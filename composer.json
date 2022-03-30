@@ -1,0 +1,27 @@
+{
+    "name": "athenea/mongo-lib",
+    "description": "Mongo utilities for Athenea Solutions",
+    "autoload": {
+        "psr-4": {
+            "Athenea\\MongoLib\\": "src/"
+        },
+        "files": [ "bson.php" ]
+    },
+    "authors": [
+        {
+            "name": "Lluc Bové",
+            "email": "lluc.bove@atheneasolutions.com"
+        }
+    ],
+    "require": {
+        "mongodb/mongodb": "^1.11",
+        "symfony/property-info": "^6.0",
+        "phpdocumentor/reflection-docblock": "^5.3",
+        "symfony/string": "^6.0",
+        "symfony/property-access": "^6.0",
+        "symfony/serializer": "^6.0"
+    },
+    "require-dev": {
+        "soyuka/stubs-mongodb": "^1.0"
+    }
+}

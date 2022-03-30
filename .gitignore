@@ -1,0 +1,7 @@
+### Composer ###
+composer.phar
+/vendor/
+
+### phpDocumentor.phar ###
+phpDocumentor.phar
+/.phpdoc/
