@@ -54,7 +54,10 @@ abstract class Base implements Serializable, Unserializable {
     {
         $normalization = new stdClass;
         $propertyAccessor = PropertyAccess::createPropertyAccessor();
-        $props = (new ReflectionClass($this))->getProperties();
+        $reflectionClass = new ReflectionClass($this);
+        $props = $reflectionClass->getProperties();
+        $propsParent = $reflectionClass->getParentClass()->getProperties();
+        $props = [...$propsParent, ...$props];
         foreach($props as $prop){
             $attrribute = $prop->getAttributes(BsonSerialize::class)[0] ?? null;
             if(!$attrribute) continue;
@@ -94,7 +97,10 @@ abstract class Base implements Serializable, Unserializable {
     {
         $propertyInfo = $this->propertyInfo();
         $propertyAccessor = PropertyAccess::createPropertyAccessor();
-        $props = (new ReflectionClass($this))->getProperties();
+        $reflectionClass = new ReflectionClass($this);
+        $props = $reflectionClass->getProperties();
+        $propsParent = $reflectionClass->getParentClass()->getProperties();
+        $props = [...$propsParent, ...$props];
         foreach($props as $prop){
             $attrribute = $prop->getAttributes(BsonSerialize::class)[0] ?? null;
             if(!$attrribute) continue;
