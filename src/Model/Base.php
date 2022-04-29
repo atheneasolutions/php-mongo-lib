@@ -3,7 +3,7 @@
 namespace Athenea\MongoLib\Model;
 
 use Athenea\MongoLib\Attribute\BsonSerialize;
-
+use BackedEnum;
 use MongoDB\BSON\Serializable;
 use MongoDB\BSON\Type;
 use MongoDB\BSON\Unserializable;
@@ -135,6 +135,7 @@ abstract class Base implements Serializable, Unserializable {
             if( $className === DateTime::class) return  new UTCDateTime($value->getTimestamp() * 1000);
             if(is_subclass_of($className, Serializable::class)) return  $value->bsonSerialize();
             if(is_subclass_of($className, Type::class)) return $value;
+            if(is_subclass_of($className, BackedEnum::class)) return $value->value;
             if($value instanceof stdClass) {
                 $newObj = new stdClass;
                 foreach($value as $key => $value){
@@ -169,9 +170,9 @@ abstract class Base implements Serializable, Unserializable {
      */
     private function unserializeProperty($value, ?array $types){
         $wantedType = $types ? (count($types) > 0 ? $types[0] : null) : null;
+        $wantedTypeClass = $wantedType?->getClassName();
         $builtinType = gettype($value);
         if($builtinType === 'object') {
-            $wantedTypeClass = $wantedType?->getClassName();
             $className = get_class($value);
             if( $value instanceof UTCDateTimeInterface) return $value->toDateTime();
             if( $value instanceof Unserializable) {
@@ -205,7 +206,14 @@ abstract class Base implements Serializable, Unserializable {
             }
             return $newArray;
         }
-        else return $value;
+        else{
+            if(in_array($builtinType, ['string', 'int'])){
+                if(is_subclass_of($wantedTypeClass, BackedEnum::class)){
+                    return $wantedTypeClass::from($value);
+                }
+            }
+            return $value;
+        } 
     }
 
 
