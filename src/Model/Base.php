@@ -181,7 +181,8 @@ abstract class Base implements Serializable, Unserializable {
                 return $x;
             }
             if( $value instanceof stdClass && $wantedTypeClass && is_subclass_of($wantedTypeClass, Unserializable::class)){
-                $x = new $wantedTypeClass();
+                $concreteClass = $this->findConcreteClass($value, $wantedTypeClass);
+                $x = new $concreteClass();
                 $x->bsonUnserialize( (array) $value);
                 return $x;
             }
@@ -214,6 +215,36 @@ abstract class Base implements Serializable, Unserializable {
             }
             return $value;
         } 
+    }
+
+    /**
+     * Donat un objecte i la classe que ha de representar, si la classe és abstracta comprova
+     * si a l'objecte li correspon una classe concreta i en retorna el nom.
+     * 
+     * S'utilitza l'atribut de discriminator map de symfony {@see https://symfony.com/doc/current/components/serializer.html#serializing-interfaces-and-abstract-classes}
+     * 
+     * @param mixed $value El valor a deserialitzar de la classe
+     * @param string $className nom de la classe
+     * @return string nom de la classe concreta si n'hi ha
+     */
+    private function findConcreteClass(mixed $value, string $className){
+        
+        $classInfo = new ReflectionClass($className);
+        $isAbstract = $classInfo->isAbstract();
+        if(!$isAbstract) return $className;
+        $attributes = $classInfo->getAttributes(DiscriminatorMap::class);
+        foreach($attributes as $refAttribute){
+            /**
+             * @var DiscriminatorMap
+             */
+            $discMap = $refAttribute->newInstance();
+            $type = $discMap->getTypeProperty();
+            $mapping = $discMap->getMapping();
+            $newClass = $mapping[$value->{$type}] ?? null;
+            if(is_null($newClass)) continue;
+            return $this->findConcreteClass($value, $newClass);
+        }
+        throw new Exception("Abstract class $className has no valid discriminator map, can't be unserialized");
     }
 
 
