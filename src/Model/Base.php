@@ -21,6 +21,7 @@ use ReflectionClass;
 use stdClass;
 use DateTime;
 use Exception;
+use Symfony\Component\Serializer\Annotation\DiscriminatorMap;
 
 /**
  * Classe per modelar documents de mongo i que siguin serialitazbles. 
