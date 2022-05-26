@@ -21,6 +21,7 @@ use ReflectionClass;
 use stdClass;
 use DateTime;
 use Exception;
+use ReflectionProperty;
 use Symfony\Component\Serializer\Annotation\DiscriminatorMap;
 
 /**
@@ -55,10 +56,7 @@ abstract class Base implements Serializable, Unserializable {
     {
         $normalization = new stdClass;
         $propertyAccessor = PropertyAccess::createPropertyAccessor();
-        $reflectionClass = new ReflectionClass($this);
-        $props = $reflectionClass->getProperties();
-        $propsParent = $reflectionClass->getParentClass()->getProperties();
-        $props = [...$propsParent, ...$props];
+        $props = $this->classProperties($this::class);
         foreach($props as $prop){
             $attrribute = $prop->getAttributes(BsonSerialize::class)[0] ?? null;
             if(!$attrribute) continue;
@@ -98,10 +96,7 @@ abstract class Base implements Serializable, Unserializable {
     {
         $propertyInfo = $this->propertyInfo();
         $propertyAccessor = PropertyAccess::createPropertyAccessor();
-        $reflectionClass = new ReflectionClass($this);
-        $props = $reflectionClass->getProperties();
-        $propsParent = $reflectionClass->getParentClass()->getProperties();
-        $props = [...$propsParent, ...$props];
+        $props = $this->classProperties($this::class);
         foreach($props as $prop){
             $attrribute = $prop->getAttributes(BsonSerialize::class)[0] ?? null;
             if(!$attrribute) continue;
@@ -246,6 +241,23 @@ abstract class Base implements Serializable, Unserializable {
             return $this->findConcreteClass($value, $newClass);
         }
         throw new Exception("Abstract class $className has no valid discriminator map, can't be unserialized");
+    }
+
+    /**
+     * Retorna les propietats d'una classe tenint en compte les classes pare
+     * que pugui tenir
+     * 
+     * @param string $className nom de la classe
+     * @return ReflectionProperty[] propietats de la classe i el seus pares
+     */
+    private function classProperties(string $className){
+        $reflectionClass = new ReflectionClass($className);
+        $props = $reflectionClass->getProperties();
+        if($parentClass = $reflectionClass->getParentClass()){
+            $parentProperties = $this->classProperties($parentClass->getName());
+            $props = [...$parentProperties, ...$props];
+        }
+        return $props;
     }
 
 
