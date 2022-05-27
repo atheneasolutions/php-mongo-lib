@@ -182,6 +182,14 @@ abstract class Base implements Serializable, Unserializable {
                 $x->bsonUnserialize( (array) $value);
                 return $x;
             }
+            if($value instanceof StdClass && $wantedType?->getBuiltinType() === 'array'){
+                $newObj = [];
+                foreach($value as $key => $value){
+                    $value = $this->unserializeProperty($value, null);
+                    $newObj[$key] = $value;
+                }
+                return $newObj;
+            }
             if($value instanceof StdClass){
                 $newObj = new stdClass;
                 foreach($value as $key => $value){
