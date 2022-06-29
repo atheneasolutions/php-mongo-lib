@@ -191,6 +191,7 @@ abstract class Base implements Serializable, Unserializable {
                 return $newObj;
             }
             if($value instanceof StdClass){
+                $className = get_class($value);
                 $newObj = new stdClass;
                 foreach($value as $key => $value){
                     //TODO: pensar si es poden definir tipus amb objectes
@@ -203,6 +204,12 @@ abstract class Base implements Serializable, Unserializable {
             return $value;
         }
         if($builtinType === 'array'){
+            if( $wantedTypeClass && is_subclass_of($wantedTypeClass, Unserializable::class)){
+                $concreteClass = $this->findConcreteClass($value, $wantedTypeClass);
+                $x = new $concreteClass();
+                $x->bsonUnserialize($value);
+                return $x;
+            }
             $newArray = [];
             foreach($value as $key => $value){
                 $arrayTypes = $wantedType?->isCollection() ? $wantedType->getCollectionValueTypes() : null;
@@ -243,8 +250,9 @@ abstract class Base implements Serializable, Unserializable {
              */
             $discMap = $refAttribute->newInstance();
             $type = $discMap->getTypeProperty();
+            $valueType = is_array($value) ? ($value[$type] ?? null) : ($value->{$type} ?? null);
             $mapping = $discMap->getMapping();
-            $newClass = $mapping[$value->{$type}] ?? null;
+            $newClass = $mapping[$valueType] ?? null;
             if(is_null($newClass)) continue;
             return $this->findConcreteClass($value, $newClass);
         }
