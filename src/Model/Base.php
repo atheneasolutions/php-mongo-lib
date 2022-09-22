@@ -40,6 +40,11 @@ use Symfony\Component\Serializer\Annotation\DiscriminatorMap;
 abstract class Base implements Serializable, Unserializable {
     
 
+    public function __construct()
+    {
+        
+    }
+
     /**
      * Retorna una array o stdClass que es poden serialitzar a BSON
      * 
@@ -54,24 +59,38 @@ abstract class Base implements Serializable, Unserializable {
      */
     public function bsonSerialize(): array|stdClass
     {
+        $reflection = new ReflectionClass($this::class);
         $normalization = new stdClass;
         $propertyAccessor = PropertyAccess::createPropertyAccessor();
-        $props = $this->classProperties($this::class);
+        $fields = $this->classProperties($this::class);
+        $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc,  [$x->getName() => $x]), []);
+        $propertyInfo = $this->propertyInfo();
+        $props = $propertyInfo->getProperties($this::class);
         foreach($props as $prop){
-            $attrribute = $prop->getAttributes(BsonSerialize::class)[0] ?? null;
+            $field = $fieldsById[$prop] ?? null;
+            if($field){
+                $attrribute = $field->getAttributes(BsonSerialize::class)[0] ?? null;
+            }
+            else{
+                foreach(['get', 'is', 'has', 'can'] as $x){
+                    $getter = $x.$prop;
+                    if(!$reflection->hasMethod($getter)) continue;
+                    $method = $reflection->getMethod($getter);
+                    $attrribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
+                }
+            }
             if(!$attrribute) continue;
             $attrribute = $attrribute->newInstance();
 
-            $propName = $prop->getName();
-            $propName = u($propName)->snake();
-            $name = $attrribute->name ?? $propName;
+            $fieldName = u($prop)->snake();
+            $name = $attrribute->name ?? $fieldName;
 
-            $isReadable = $propertyAccessor->isReadable($this, $propName);
+            $isReadable = $propertyAccessor->isReadable($this, $prop);
             if(!$isReadable) continue;
             
-            $value = $propertyAccessor->getValue($this, $propName);
-
+            $value = $propertyAccessor->getValue($this, $prop);
             $normalization->{$name} = $this->serializeProperty($value);
+            
             
         }
         return $normalization;
@@ -94,23 +113,36 @@ abstract class Base implements Serializable, Unserializable {
      */
     public function bsonUnserialize($data)
     {
+        $this->__construct();
+        $fields = $this->classProperties($this::class);
+        $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc,  [$x->getName() => $x]), []);
         $propertyInfo = $this->propertyInfo();
         $propertyAccessor = PropertyAccess::createPropertyAccessor();
-        $props = $this->classProperties($this::class);
+        $props = $propertyInfo->getProperties($this::class);
+        $reflection = new ReflectionClass($this::class);
         foreach($props as $prop){
-            $attrribute = $prop->getAttributes(BsonSerialize::class)[0] ?? null;
+            $field = $fieldsById[$prop] ?? null;
+            if($field){
+                $attrribute = $field->getAttributes(BsonSerialize::class)[0] ?? null;
+            }
+            else {
+                $setter = "set".$prop;
+                if(!$reflection->hasMethod($setter)) continue;
+                $method = $reflection->getMethod($setter);
+                $attrribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
+            }
+            
             if(!$attrribute) continue;
             $attrribute = $attrribute->newInstance();
 
-            $propName = $prop->getName();
-            $types = $propertyInfo->getTypes($this::class, $propName);
-            $propNameSnake = u($propName)->snake()->toString();
+            $types = $propertyInfo->getTypes($this::class, $prop);
+            $propNameSnake = u($prop)->snake()->toString();
             $name = $attrribute->name ?? $propNameSnake;
 
             if(isset($data[$name])) {
                 $value = $data[$name];
                 $unserializedValue = $this->unserializeProperty($value, $types);
-                if(! is_null($unserializedValue) || ( $types && count($types) && $types[0]->isNullable())) $propertyAccessor->setValue($this, $propName, $unserializedValue);
+                if(! is_null($unserializedValue) || ( $types && count($types) && $types[0]->isNullable())) $propertyAccessor->setValue($this, $prop, $unserializedValue);
             }
         }
     }
@@ -275,7 +307,6 @@ abstract class Base implements Serializable, Unserializable {
         }
         return $props;
     }
-
 
     /**
      * Retorna un extractor de informació de propietats
