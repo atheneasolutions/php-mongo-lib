@@ -67,23 +67,24 @@ abstract class Base implements Serializable, Unserializable {
         $propertyInfo = $this->propertyInfo();
         $props = $propertyInfo->getProperties($this::class);
         foreach($props as $prop){
+            $attribute = null;
             $field = $fieldsById[$prop] ?? null;
             if($field){
-                $attrribute = $field->getAttributes(BsonSerialize::class)[0] ?? null;
+                $attribute = $field->getAttributes(BsonSerialize::class)[0] ?? null;
             }
             else{
                 foreach(['get', 'is', 'has', 'can'] as $x){
                     $getter = $x.$prop;
                     if(!$reflection->hasMethod($getter)) continue;
                     $method = $reflection->getMethod($getter);
-                    $attrribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
+                    $attribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
                 }
             }
-            if(!$attrribute) continue;
-            $attrribute = $attrribute->newInstance();
+            if(!$attribute) continue;
+            $attribute = $attribute->newInstance();
 
             $fieldName = u($prop)->snake();
-            $name = $attrribute->name ?? $fieldName;
+            $name = $attribute->name ?? $fieldName;
 
             $isReadable = $propertyAccessor->isReadable($this, $prop);
             if(!$isReadable) continue;
@@ -122,22 +123,23 @@ abstract class Base implements Serializable, Unserializable {
         $reflection = new ReflectionClass($this::class);
         foreach($props as $prop){
             $field = $fieldsById[$prop] ?? null;
+            $attribute = null;
             if($field){
-                $attrribute = $field->getAttributes(BsonSerialize::class)[0] ?? null;
+                $attribute = $field->getAttributes(BsonSerialize::class)[0] ?? null;
             }
             else {
                 $setter = "set".$prop;
                 if(!$reflection->hasMethod($setter)) continue;
                 $method = $reflection->getMethod($setter);
-                $attrribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
+                $attribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
             }
             
-            if(!$attrribute) continue;
-            $attrribute = $attrribute->newInstance();
+            if(!$attribute) continue;
+            $attribute = $attribute->newInstance();
 
             $types = $propertyInfo->getTypes($this::class, $prop);
             $propNameSnake = u($prop)->snake()->toString();
-            $name = $attrribute->name ?? $propNameSnake;
+            $name = $attribute->name ?? $propNameSnake;
 
             if(isset($data[$name])) {
                 $value = $data[$name];
