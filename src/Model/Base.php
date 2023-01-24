@@ -21,6 +21,8 @@ use ReflectionClass;
 use stdClass;
 use DateTime;
 use Exception;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\BSONDocument;
 use ReflectionProperty;
 use Symfony\Component\Serializer\Annotation\DiscriminatorMap;
 
@@ -205,7 +207,14 @@ abstract class Base implements Serializable, Unserializable {
         if($builtinType === 'object') {
             $className = get_class($value);
             if( $value instanceof UTCDateTimeInterface) return $value->toDateTime();
+            if($value instanceof BSONDocument){
+                return $this->unserializeProperty($value->bsonSerialize(), $types);
+            }
+            if($value instanceof BSONArray){
+                return $this->unserializeProperty($value->bsonSerialize(), $types);
+            }
             if( $value instanceof Unserializable) {
+                //TODO: revisar, sembla que no hauria de ser així. potser no cal la norma.
                 $x = new $className();
                 $x->bsonUnserialize( (array) $value);
                 return $x;
