@@ -9,7 +9,7 @@ use MongoDB\BSON\UTCDateTimeInterface;
 
 class Utils{
 
-    protected static function normalize(\MongoDB\Model\BSONDocument $bSONDocument){
+    public static function normalize(\MongoDB\Model\BSONDocument $bSONDocument){
         $serialization = $bSONDocument->jsonSerialize();
         $newSerialization = [];
         foreach($serialization as $key => $value){
@@ -27,7 +27,7 @@ class Utils{
         return $newSerialization;
     }
 
-    protected static function normalizeArray(\MongoDB\Model\BSONArray $bSONArray){
+    public static function normalizeArray(\MongoDB\Model\BSONArray $bSONArray){
         $newSerialization = [];
         $serialization = $bSONArray->jsonSerialize();
         foreach($serialization as $value){
@@ -45,7 +45,7 @@ class Utils{
         return $newSerialization;
     }
 
-    protected static function normalizeIterable($iterable){
+    public static function normalizeIterable($iterable){
         $newSerialization = [];
         foreach($iterable as $value){
             if(is_a($value, \MongoDB\Model\BSONArray::class)) {
@@ -64,7 +64,7 @@ class Utils{
 
 
 
-    protected static function normalizeGeneric($obj){
+    public static function normalizeGeneric($obj){
         if(!$obj) return null;
         if(is_a($obj, \MongoDB\Model\BSONDocument::class)) return self::normalize($obj);
         if(is_a($obj, \MongoDB\Model\BSONArray::class)) return self::normalizeArray($obj);
@@ -79,7 +79,7 @@ class Utils{
      * @param DateTimeInterface $date data a convertir
      * @return UTCDateTime Data de mongo que correspon a $date
      */
-    protected function date(DateTimeInterface $date): UTCDateTime
+    public function date(DateTimeInterface $date): UTCDateTime
     {
         return new UTCDateTime($date->getTimestamp() * 1000);
     }
@@ -88,7 +88,7 @@ class Utils{
      * Obté la UTCDateTime de mongo que representa la data actual
      * @return UTCDateTime data de mongo que representa la data actual
      */
-    protected function now(): UTCDateTime
+    public function now(): UTCDateTime
     {
         return $this->date(new DateTime());
     }
