@@ -79,7 +79,7 @@ class Utils{
      * @param DateTimeInterface $date data a convertir
      * @return UTCDateTime Data de mongo que correspon a $date
      */
-    public function date(DateTimeInterface $date): UTCDateTime
+    public static function date(DateTimeInterface $date): UTCDateTime
     {
         return new UTCDateTime($date->getTimestamp() * 1000);
     }
@@ -88,8 +88,8 @@ class Utils{
      * Obté la UTCDateTime de mongo que representa la data actual
      * @return UTCDateTime data de mongo que representa la data actual
      */
-    public function now(): UTCDateTime
+    public static function now(): UTCDateTime
     {
-        return $this->date(new DateTime());
+        return self::date(new DateTime());
     }
 }
