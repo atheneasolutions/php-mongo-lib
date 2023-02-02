@@ -114,7 +114,7 @@ abstract class Base implements Serializable, Unserializable {
      * 
      * @return array|stdClass Una array o stdClass que es poden serialitzar a BSON
      */
-    public function bsonUnserialize($data)
+    public function bsonUnserialize($data): void
     {
         $this->__construct();
         $fields = $this->classProperties($this::class);
