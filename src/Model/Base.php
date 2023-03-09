@@ -20,6 +20,7 @@ use function Symfony\Component\String\u;
 use ReflectionClass;
 use stdClass;
 use DateTime;
+use DateTimeInterface;
 use Exception;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
@@ -165,6 +166,7 @@ abstract class Base implements Serializable, Unserializable {
         if($builtinType === 'object') {
             $className =get_class($value);
             if( $className === DateTime::class) return  new UTCDateTime($value->getTimestamp() * 1000);
+            if(is_subclass_of($className, DateTimeInterface::class)) return  new UTCDateTime($value->getTimestamp() * 1000);
             if(is_subclass_of($className, Serializable::class)) return  $value->bsonSerialize();
             if(is_subclass_of($className, Type::class)) return $value;
             if(is_subclass_of($className, BackedEnum::class)) return $value->value;
