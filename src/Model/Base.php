@@ -144,8 +144,8 @@ abstract class Base implements Serializable, Unserializable {
             $propNameSnake = u($prop)->snake()->toString();
             $name = $attribute->name ?? $propNameSnake;
 
-            if(isset($data[$name])) {
-                $value = $data[$name];
+            if($this->isset($data, $name)) {
+                $value = $this->accesGeneric($data, $name);
                 $unserializedValue = $this->unserializeProperty($value, $types);
                 if(! is_null($unserializedValue) || ( $types && count($types) && $types[0]->isNullable())) $propertyAccessor->setValue($this, $prop, $unserializedValue);
             }
@@ -356,6 +356,17 @@ abstract class Base implements Serializable, Unserializable {
             $propertyInitializableExtractors
         );
         return $propertyInfo;
+    }
+
+    private function isset($data, $key){
+        if(is_array($data)) return isset($data[$key]);
+        if(is_object($data)) return isset($data->key);
+        return false;
+    }
+
+    private function accesGeneric($data, $key){
+        if(is_array($data)) $data[$key] ?? null;
+        if(is_object($data)) $data->key ?? null;
     }
 
 }
