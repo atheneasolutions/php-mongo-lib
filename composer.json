@@ -19,7 +19,7 @@
         "phpdocumentor/reflection-docblock": "^5.3",
         "symfony/string": "^6.0",
         "symfony/property-access": "^6.0",
-        "symfony/serializer": "^6.0"
+        "symfony/serializer": "^6.0",
     },
     "require-dev": {
         "soyuka/stubs-mongodb": "^1.0"

@@ -365,8 +365,8 @@ abstract class Base implements Serializable, Unserializable {
     }
 
     private function accesGeneric($data, $key){
-        if(is_array($data)) $data[$key] ?? null;
-        if(is_object($data)) $data->key ?? null;
+        if(is_array($data)) return $data[$key] ?? null;
+        if(is_object($data)) return $data->{$key} ?? null;
     }
 
 }
