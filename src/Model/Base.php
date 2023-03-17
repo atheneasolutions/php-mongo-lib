@@ -360,7 +360,7 @@ abstract class Base implements Serializable, Unserializable {
 
     private function isset($data, $key){
         if(is_array($data)) return isset($data[$key]);
-        if(is_object($data)) return isset($data->key);
+        if(is_object($data)) return isset($data->{$key});
         return false;
     }
 
