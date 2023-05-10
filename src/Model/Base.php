@@ -22,6 +22,7 @@ use stdClass;
 use DateTime;
 use DateTimeInterface;
 use Exception;
+use MongoDB\BSON\ObjectId;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 use ReflectionProperty;
@@ -144,12 +145,64 @@ abstract class Base implements Serializable, Unserializable {
             $propNameSnake = u($prop)->snake()->toString();
             $name = $attribute->name ?? $propNameSnake;
 
-            if($this->isset($data, $name)) {
+            if($this->genericIsset($data, $name)) {
                 $value = $this->accesGeneric($data, $name);
                 $unserializedValue = $this->unserializeProperty($value, $types);
                 if(! is_null($unserializedValue) || ( $types && count($types) && $types[0]->isNullable())) $propertyAccessor->setValue($this, $prop, $unserializedValue);
             }
         }
+    }
+
+    public function bsonChanges(Base $b){
+        return $this->iBsonChanges($this->bsonSerialize(), $b->bsonSerialize());
+    }
+
+    private function iBsonChanges(array | stdClass $aBson, array | stdClass $bBson, string $prefix = ""): array
+    {
+        $changes = [];
+        $push = [];
+        $set = [];
+        $unset = [];
+        $pull = [];
+        foreach($aBson as $aKey => $aValue){
+            $bValue = $this->accesGeneric($bBson, $aKey);
+            if(is_null($bValue)) $unset[$prefix.$aKey] = "";
+            else if(gettype($aValue) !== gettype($bValue)) $set[$prefix.$aKey] = $bValue;
+            else if(is_object($aValue) && ! is_object($bValue)) $set[$prefix.$aKey] = $bValue;
+            else if(!is_object($aValue) && is_object($bValue)) $set[$prefix.$aKey] = $bValue;
+            else if(!is_object($aValue) && !is_object($bValue)) if($aValue !== $bValue) $set[$prefix.$aKey] = $bValue;
+            else{
+                if(get_class($aValue) !== get_class($bValue)) $set[$prefix.$aKey] = $bValue;
+                else{
+                    if( ($aValue instanceof stdClass) || ( is_array($aValue) && $this->arrayIsAssoc($aValue) ) ) {
+                        $diff = $this->iBsonChanges($aValue, $bValue, $prefix.$aKey);
+                        if(count($diff) > 0){
+                            if(is_null($iPush = $diff['$push'] ?? null)) $push = [...$push, ...$iPush];
+                            if(is_null($iPull = $diff['$pull'] ?? null)) $pull = [...$pull, ...$iPull];
+                            if(is_null($iSet = $diff['$set'] ?? null)) $set = [...$set, ...$iSet];
+                            if(is_null($iUnset = $diff['$unset'] ?? null)) $unset = [...$unset, ...$iUnset];
+                        }
+                    }
+                    // de moment només distingim cas de fer push
+                    else if(is_array($aValue)) $set[$prefix.$aKey] = $bValue;
+                    else{
+                        if($aValue instanceof ObjectId && $aValue->__toString() !== $bValue->__toString()) $set[$prefix.$aKey] = $bValue;
+                        if($aValue instanceof UTCDateTimeInterface && $aValue->toDateTime() !== $bValue->toDateTime()) $set[$prefix.$aKey] = $bValue;
+                        else $set[$prefix.$aKey] = $bValue;
+                    }
+                }
+            }
+        }
+        // camps que són a B i no a A
+        foreach($bBson as $bKey => $bValue){
+            $aValue = $this->accesGeneric($aBson, $bKey);
+            if(is_null($aValue)) $set[$prefix.$bKey] = $bValue;
+        }
+        if(count($push)) $changes['$push'] = $push;
+        if(count($pull)) $changes['$pull'] = $pull;
+        if(count($set)) $changes['$set'] = $set;
+        if(count($unset)) $changes['$unset'] = $unset;
+        return $changes;
     }
         
     /**
@@ -358,7 +411,7 @@ abstract class Base implements Serializable, Unserializable {
         return $propertyInfo;
     }
 
-    private function isset($data, $key){
+    private function genericIsset($data, $key){
         if(is_array($data)) return isset($data[$key]);
         if(is_object($data)) return isset($data->{$key});
         return false;
@@ -368,5 +421,12 @@ abstract class Base implements Serializable, Unserializable {
         if(is_array($data)) return $data[$key] ?? null;
         if(is_object($data)) return $data->{$key} ?? null;
     }
+
+    private function arrayIsAssoc(array $arr)
+    {
+        if (array() === $arr) return false;
+        return array_keys($arr) !== range(0, count($arr) - 1);
+    }
+
 
 }
