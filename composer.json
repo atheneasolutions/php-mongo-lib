@@ -15,11 +15,11 @@
     ],
     "require": {
         "mongodb/mongodb": "^1.11",
-        "symfony/property-info": "^6.0",
+        "symfony/property-info": "^7.0",
         "phpdocumentor/reflection-docblock": "^5.3",
-        "symfony/string": "^6.0",
-        "symfony/property-access": "^6.0",
-        "symfony/serializer": "^6.0"
+        "symfony/string": "^7.0",
+        "symfony/property-access": "^7.0",
+        "symfony/serializer": "^7.0"
     },
     "require-dev": {
         "soyuka/stubs-mongodb": "^1.0"
