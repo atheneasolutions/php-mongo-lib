@@ -81,7 +81,9 @@ class Utils{
      */
     public static function date(DateTimeInterface $date): UTCDateTime
     {
-        return new UTCDateTime($date->getTimestamp() * 1000);
+        $timestampWithMicroseconds = $date->format('U.u'); // Get seconds with microseconds as a float string
+        $milliseconds = (int) ($timestampWithMicroseconds * 1000); // Convert to milliseconds
+        return new UTCDateTime($milliseconds);
     }
 
     /**
