@@ -14,7 +14,7 @@
         }
     ],
     "require": {
-        "mongodb/mongodb": "^1.11",
+        "mongodb/mongodb": "^2.1",
         "symfony/property-info": "^7.0",
         "phpdocumentor/reflection-docblock": "^5.3",
         "symfony/string": "^7.0",
