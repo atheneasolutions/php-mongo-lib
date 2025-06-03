@@ -14,12 +14,12 @@
         }
     ],
     "require": {
-        "mongodb/mongodb": "^2.1",
-        "symfony/property-info": "^7.0",
+        "mongodb/mongodb": "^1.0 || ^2.0",
         "phpdocumentor/reflection-docblock": "^5.3",
-        "symfony/string": "^7.0",
-        "symfony/property-access": "^7.0",
-        "symfony/serializer": "^7.0"
+        "symfony/property-info":    "^5.0 || ^6.0 || ^7.0",
+        "symfony/string":           "^5.0 || ^6.0 || ^7.0",
+        "symfony/property-access":  "^5.0 || ^6.0 || ^7.0",
+        "symfony/serializer":       "^5.0 || ^6.0 || ^7.0"
     },
     "require-dev": {
         "soyuka/stubs-mongodb": "^1.0"
