@@ -142,7 +142,7 @@ abstract class Base implements Serializable, Unserializable {
             if(!$attribute) continue;
             $attribute = $attribute->newInstance();
 
-            $types = $propertyInfo->getTypes($this::class, $prop);
+            $types = method_exists($propertyInfo, 'getTypes') ? $propertyInfo->getTypes($this::class, $prop) :  $propertyInfo->getType($this::class, $prop);
             $propNameSnake = u($prop)->snake()->toString();
             $name = $attribute->name ?? $propNameSnake;
 
