@@ -14,7 +14,6 @@ use Symfony\Component\PropertyInfo\Extractor\PhpDocExtractor;
 use Symfony\Component\PropertyInfo\Extractor\ReflectionExtractor;
 use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
 use Symfony\Component\PropertyAccess\PropertyAccess;
-use Symfony\Component\PropertyInfo\Type as PropertyInfoType;
 use function Symfony\Component\String\u;
 
 use ReflectionClass;
@@ -28,6 +27,13 @@ use MongoDB\Model\BSONDocument;
 use ReflectionProperty;
 use Symfony\Component\Serializer\Attribute\DiscriminatorMap;
 use Symfony\Component\Serializer\Annotation\DiscriminatorMap as OldDiscriminatorMap;
+use Symfony\Component\TypeInfo\Type as TypeInfoType;
+use Symfony\Component\TypeInfo\Type\BuiltinType;
+use Symfony\Component\TypeInfo\Type\CollectionType;
+use Symfony\Component\TypeInfo\Type\CompositeTypeInterface;
+use Symfony\Component\TypeInfo\Type\NullableType;
+use Symfony\Component\TypeInfo\Type\ObjectType;
+use Symfony\Component\TypeInfo\TypeIdentifier;
 
 /**
  * Classe per modelar documents de mongo i que siguin serialitazbles. 
@@ -142,14 +148,14 @@ abstract class Base implements Serializable, Unserializable {
             if(!$attribute) continue;
             $attribute = $attribute->newInstance();
 
-            $types = method_exists($propertyInfo, 'getTypes') ? $propertyInfo->getTypes($this::class, $prop) :  $propertyInfo->getType($this::class, $prop);
+            $type = $propertyInfo->getType($this::class, $prop);
             $propNameSnake = u($prop)->snake()->toString();
             $name = $attribute->name ?? $propNameSnake;
 
             if($this->genericIsset($data, $name)) {
                 $value = $this->accesGeneric($data, $name);
-                $unserializedValue = $this->unserializeProperty($value, $types);
-                if(! is_null($unserializedValue) || ( $types && count($types) && $types[0]->isNullable())) $propertyAccessor->setValue($this, $prop, $unserializedValue);
+                $unserializedValue = $this->unserializeProperty($value, $type);
+                if(! is_null($unserializedValue) || ( $type && $type instanceof NullableType)) $propertyAccessor->setValue($this, $prop, $unserializedValue);
             }
         }
     }
@@ -253,21 +259,21 @@ abstract class Base implements Serializable, Unserializable {
      * Retorna un valor a punt per ser deserialitzat tal i com es descriu a {@see Base::bsonUnserialize()}.
      * 
      * @todo implementar múltiples tipus. Ara mateix només agafa el primer
-     * @param PropertyInfoType[] $types Array amb els tipus del camp a deserialitzar
+     * @param TypeInfoType $type Array amb els tipus del camp a deserialitzar
      * @return mixed Representació del valor a punt per ser deserialitzada
      */
-    private function unserializeProperty($value, ?array $types){
-        $wantedType = $types ? (count($types) > 0 ? $types[0] : null) : null;
-        $wantedTypeClass = $wantedType?->getClassName();
+    private function unserializeProperty($value, ?TypeInfoType $type){
+        $wantedType = ($type instanceof CompositeTypeInterface) ? $this->findNonNullType($type->getTypes()) : $type;
+        $wantedTypeClass = ($wantedType instanceof ObjectType) ? $wantedType->getClassName() : ( ($wantedType instanceof BuiltinType) ? $wantedType->getTypeIdentifier()->value : null);
         $builtinType = gettype($value);
         if($builtinType === 'object') {
             $className = get_class($value);
             if( $value instanceof UTCDateTimeInterface) return $value->toDateTime();
             if($value instanceof BSONDocument){
-                return $this->unserializeProperty($value->bsonSerialize(), $types);
+                return $this->unserializeProperty($value->bsonSerialize(), $type);
             }
             if($value instanceof BSONArray){
-                return $this->unserializeProperty($value->bsonSerialize(), $types);
+                return $this->unserializeProperty($value->bsonSerialize(), $type);
             }
             if( $value instanceof Unserializable) {
                 //TODO: revisar, sembla que no hauria de ser així. potser no cal la norma.
@@ -281,7 +287,7 @@ abstract class Base implements Serializable, Unserializable {
                 $x->bsonUnserialize( (array) $value);
                 return $x;
             }
-            if($value instanceof StdClass && $wantedType?->getBuiltinType() === 'array'){
+            if($value instanceof StdClass && $wantedType instanceof CollectionType){
                 $newObj = [];
                 foreach($value as $key => $value){
                     $value = $this->unserializeProperty($value, null);
@@ -311,7 +317,7 @@ abstract class Base implements Serializable, Unserializable {
             }
             $newArray = [];
             foreach($value as $key => $value){
-                $arrayTypes = $wantedType?->isCollection() ? $wantedType->getCollectionValueTypes() : null;
+                $arrayTypes = $wantedType instanceof CollectionType ? $wantedType->getCollectionValueType() : null;
                 $value = $this->unserializeProperty($value, $arrayTypes);
                 $newArray[$key] = $value;
             }
@@ -325,6 +331,18 @@ abstract class Base implements Serializable, Unserializable {
             }
             return $value;
         } 
+    }
+
+    /**
+     * Find first non null type for composite type
+     * @param TypeInfoType[] $types
+     * @return ?TypeInfoType primer tipus no "null", o sino torna null
+     */
+    private function findNonNullType(array $types){
+        foreach($types as $t){
+            if(! $t->isIdentifiedBy(TypeIdentifier::NULL)) return $t;
+        }
+        return null;
     }
 
     /**
