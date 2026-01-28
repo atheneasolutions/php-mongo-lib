@@ -26,7 +26,8 @@ use MongoDB\BSON\ObjectId;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 use ReflectionProperty;
-use Symfony\Component\Serializer\Annotation\DiscriminatorMap;
+use Symfony\Component\Serializer\Attribute\DiscriminatorMap;
+use Symfony\Component\Serializer\Annotation\DiscriminatorMap as OldDiscriminatorMap;
 
 /**
  * Classe per modelar documents de mongo i que siguin serialitazbles. 
@@ -342,9 +343,11 @@ abstract class Base implements Serializable, Unserializable {
         $isAbstract = $classInfo->isAbstract();
         if(!$isAbstract) return $className;
         $attributes = $classInfo->getAttributes(DiscriminatorMap::class);
+        $oldDiscriminatorAttributes =  $classInfo->getAttributes(OldDiscriminatorMap::class);
+        $attributes = [...$attributes, ...$oldDiscriminatorAttributes];
         foreach($attributes as $refAttribute){
             /**
-             * @var DiscriminatorMap
+             * @var DiscriminatorMap|OldDiscriminatorMap $discMap
              */
             $discMap = $refAttribute->newInstance();
             $type = $discMap->getTypeProperty();
