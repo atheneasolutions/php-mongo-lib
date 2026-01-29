@@ -26,7 +26,6 @@ use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 use ReflectionProperty;
 use Symfony\Component\Serializer\Attribute\DiscriminatorMap;
-use Symfony\Component\Serializer\Annotation\DiscriminatorMap as OldDiscriminatorMap;
 use Symfony\Component\TypeInfo\Type as TypeInfoType;
 use Symfony\Component\TypeInfo\Type\BuiltinType;
 use Symfony\Component\TypeInfo\Type\CollectionType;
@@ -361,16 +360,15 @@ abstract class Base implements Serializable, Unserializable {
         $isAbstract = $classInfo->isAbstract();
         if(!$isAbstract) return $className;
         $attributes = $classInfo->getAttributes(DiscriminatorMap::class);
-        $oldDiscriminatorAttributes =  $classInfo->getAttributes(OldDiscriminatorMap::class);
-        $attributes = [...$attributes, ...$oldDiscriminatorAttributes];
+        $attributes = [...$attributes];
         foreach($attributes as $refAttribute){
             /**
-             * @var DiscriminatorMap|OldDiscriminatorMap $discMap
+             * @var DiscriminatorMap $discMap
              */
             $discMap = $refAttribute->newInstance();
-            $type = $discMap->getTypeProperty();
+            $type = $discMap->typeProperty;
             $valueType = is_array($value) ? ($value[$type] ?? null) : ($value->{$type} ?? null);
-            $mapping = $discMap->getMapping();
+            $mapping = $discMap->mapping;
             $newClass = $mapping[$valueType] ?? null;
             if(is_null($newClass)) continue;
             return $this->findConcreteClass($value, $newClass);
