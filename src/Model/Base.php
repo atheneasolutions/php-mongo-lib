@@ -360,15 +360,17 @@ abstract class Base implements Serializable, Unserializable {
         $isAbstract = $classInfo->isAbstract();
         if(!$isAbstract) return $className;
         $attributes = $classInfo->getAttributes(DiscriminatorMap::class);
-        $attributes = [...$attributes];
+        $oldDiscriminatorAttributes = $classInfo->getAttributes(\Symfony\Component\Serializer\Annotation\DiscriminatorMap::class);
+        $attributes = [...$attributes, ...$oldDiscriminatorAttributes];
         foreach($attributes as $refAttribute){
             /**
              * @var DiscriminatorMap $discMap
              */
             $discMap = $refAttribute->newInstance();
-            $type = $discMap->typeProperty;
+            // getTypeProperty()/getMapping() exist in Symfony ≤7; Symfony 8 uses public readonly props
+            $type = method_exists($discMap, 'getTypeProperty') ? $discMap->getTypeProperty() : $discMap->typeProperty;
             $valueType = is_array($value) ? ($value[$type] ?? null) : ($value->{$type} ?? null);
-            $mapping = $discMap->mapping;
+            $mapping = method_exists($discMap, 'getMapping') ? $discMap->getMapping() : $discMap->mapping;
             $newClass = $mapping[$valueType] ?? null;
             if(is_null($newClass)) continue;
             return $this->findConcreteClass($value, $newClass);
