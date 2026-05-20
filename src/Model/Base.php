@@ -14,6 +14,7 @@ use Symfony\Component\PropertyInfo\Extractor\PhpDocExtractor;
 use Symfony\Component\PropertyInfo\Extractor\ReflectionExtractor;
 use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
 use Symfony\Component\PropertyAccess\PropertyAccess;
+use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 use function Symfony\Component\String\u;
 
 use ReflectionClass;
@@ -49,6 +50,14 @@ use Symfony\Component\TypeInfo\TypeIdentifier;
  */
 abstract class Base implements Serializable, Unserializable {
     
+    private static ?PropertyInfoExtractor $propertyInfoCache = null;
+    private static ?PropertyAccessorInterface $propertyAccessorCache = null;
+
+    /** @var array<string, ReflectionClass> */
+    private static array $reflectionClassCache = [];
+
+    /** @var array<string, ReflectionProperty[]> */
+    private static array $classPropertiesCache = [];
 
     public function __construct()
     {
@@ -69,9 +78,9 @@ abstract class Base implements Serializable, Unserializable {
      */
     public function bsonSerialize(): array|stdClass
     {
-        $reflection = new ReflectionClass($this::class);
+        $reflection = self::$reflectionClassCache[$this::class] ??= new ReflectionClass($this::class);
         $normalization = new stdClass;
-        $propertyAccessor = PropertyAccess::createPropertyAccessor();
+        $propertyAccessor = self::$propertyAccessorCache ??= PropertyAccess::createPropertyAccessor();
         $fields = $this->classProperties($this::class);
         $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc,  [$x->getName() => $x]), []);
         $propertyInfo = $this->propertyInfo();
@@ -128,9 +137,9 @@ abstract class Base implements Serializable, Unserializable {
         $fields = $this->classProperties($this::class);
         $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc,  [$x->getName() => $x]), []);
         $propertyInfo = $this->propertyInfo();
-        $propertyAccessor = PropertyAccess::createPropertyAccessor();
+        $propertyAccessor = self::$propertyAccessorCache ??= PropertyAccess::createPropertyAccessor();
         $props = $propertyInfo->getProperties($this::class);
-        $reflection = new ReflectionClass($this::class);
+        $reflection = self::$reflectionClassCache[$this::class] ??= new ReflectionClass($this::class);
         foreach($props as $prop){
             $field = $fieldsById[$prop] ?? null;
             $attribute = null;
@@ -172,11 +181,11 @@ abstract class Base implements Serializable, Unserializable {
         $pull = [];
         foreach($aBson as $aKey => $aValue){
             $bValue = $this->accesGeneric($bBson, $aKey);
-            if(is_null($bValue)) $unset[$prefix.$aKey] = "";
+            if(is_null($bValue) && !is_null($aValue)) $unset[$prefix.$aKey] = "";
             else if(gettype($aValue) !== gettype($bValue)) $set[$prefix.$aKey] = $bValue;
             else if(is_object($aValue) && ! is_object($bValue)) $set[$prefix.$aKey] = $bValue;
             else if(!is_object($aValue) && is_object($bValue)) $set[$prefix.$aKey] = $bValue;
-            else if(!is_object($aValue) && !is_object($bValue)) if($aValue !== $bValue) $set[$prefix.$aKey] = $bValue;
+            else if(!is_object($aValue) && !is_object($bValue)) { if($aValue !== $bValue) $set[$prefix.$aKey] = $bValue; }
             else{
                 if(get_class($aValue) !== get_class($bValue)) $set[$prefix.$aKey] = $bValue;
                 else{
@@ -192,8 +201,12 @@ abstract class Base implements Serializable, Unserializable {
                     // de moment només distingim cas de fer push
                     else if(is_array($aValue)) $set[$prefix.$aKey] = $bValue;
                     else{
-                        if($aValue instanceof ObjectId && $aValue->__toString() !== $bValue->__toString()) $set[$prefix.$aKey] = $bValue;
-                        if($aValue instanceof UTCDateTimeInterface && $aValue->toDateTime() !== $bValue->toDateTime()) $set[$prefix.$aKey] = $bValue;
+                        if($aValue instanceof ObjectId){
+                            if($aValue->__toString() !== $bValue->__toString()) $set[$prefix.$aKey] = $bValue;
+                        }
+                        else if($aValue instanceof UTCDateTimeInterface){
+                            if($aValue->toDateTime() != $bValue->toDateTime()) $set[$prefix.$aKey] = $bValue;
+                        }
                         else $set[$prefix.$aKey] = $bValue;
                     }
                 }
@@ -202,7 +215,7 @@ abstract class Base implements Serializable, Unserializable {
         // camps que són a B i no a A
         foreach($bBson as $bKey => $bValue){
             $aValue = $this->accesGeneric($aBson, $bKey);
-            if(is_null($aValue)) $set[$prefix.$bKey] = $bValue;
+            if(is_null($aValue) && !is_null($bValue)) $set[$prefix.$bKey] = $bValue;
         }
         if(count($push)) $changes['$push'] = $push;
         if(count($pull)) $changes['$pull'] = $pull;
@@ -386,12 +399,16 @@ abstract class Base implements Serializable, Unserializable {
      * @return ReflectionProperty[] propietats de la classe i el seus pares
      */
     private function classProperties(string $className){
-        $reflectionClass = new ReflectionClass($className);
+        if (isset(self::$classPropertiesCache[$className])) {
+            return self::$classPropertiesCache[$className];
+        }
+        $reflectionClass = self::$reflectionClassCache[$className] ??= new ReflectionClass($className);
         $props = $reflectionClass->getProperties();
         if($parentClass = $reflectionClass->getParentClass()){
             $parentProperties = $this->classProperties($parentClass->getName());
             $props = [...$parentProperties, ...$props];
         }
+        self::$classPropertiesCache[$className] = $props;
         return $props;
     }
 
@@ -403,7 +420,10 @@ abstract class Base implements Serializable, Unserializable {
      */
     private function propertyInfo(): PropertyInfoExtractor
     {
-        // a full list of extractors is shown further below
+        if (self::$propertyInfoCache !== null) {
+            return self::$propertyInfoCache;
+        }
+
         $phpDocExtractor = new PhpDocExtractor();
         $reflectionExtractor = new ReflectionExtractor();
 
@@ -422,14 +442,14 @@ abstract class Base implements Serializable, Unserializable {
         // list of PropertyInitializableExtractorInterface (any iterable)
         $propertyInitializableExtractors = [$reflectionExtractor];
 
-        $propertyInfo = new PropertyInfoExtractor(
+        self::$propertyInfoCache = new PropertyInfoExtractor(
             $listExtractors,
             $typeExtractors,
             $descriptionExtractors,
             $accessExtractors,
             $propertyInitializableExtractors
         );
-        return $propertyInfo;
+        return self::$propertyInfoCache;
     }
 
     private function genericIsset($data, $key){

@@ -7,6 +7,12 @@
         },
         "files": [ "bson.php" ]
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Athenea\\MongoLib\\Tests\\": "tests/"
+        },
+        "files": ["tests/Model/TestModels.php"]
+    },
     "authors": [
         {
             "name": "Lluc Bové",
@@ -22,6 +28,7 @@
         "symfony/serializer":       "^5.0 || ^6.0 || ^7.0 || ^8.0"
     },
     "require-dev": {
-        "soyuka/stubs-mongodb": "^1.0"
+        "soyuka/stubs-mongodb": "^1.0",
+        "phpunit/phpunit": "^10.0"
     }
 }
