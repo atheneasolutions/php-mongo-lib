@@ -59,6 +59,12 @@ abstract class Base implements Serializable, Unserializable {
     /** @var array<string, ReflectionProperty[]> */
     private static array $classPropertiesCache = [];
 
+    /** @var array<string, array{prop: string, bsonName: string}[]> Serializable properties per class */
+    private static array $serializablePropertiesCache = [];
+
+    /** @var array<string, array{prop: string, bsonName: string, type: ?TypeInfoType}[]> Deserializable properties per class */
+    private static array $deserializablePropertiesCache = [];
+
     public function __construct()
     {
         
@@ -78,13 +84,36 @@ abstract class Base implements Serializable, Unserializable {
      */
     public function bsonSerialize(): array|stdClass
     {
-        $reflection = self::$reflectionClassCache[$this::class] ??= new ReflectionClass($this::class);
         $normalization = new stdClass;
         $propertyAccessor = self::$propertyAccessorCache ??= PropertyAccess::createPropertyAccessor();
+
+        if (!isset(self::$serializablePropertiesCache[$this::class])) {
+            self::$serializablePropertiesCache[$this::class] = $this->resolveSerializableProperties();
+        }
+
+        $props = self::$serializablePropertiesCache[$this::class];
+        foreach($props as $propName => $bsonName){
+            $value = $propertyAccessor->getValue($this, $propName);
+            $normalization->{$bsonName} = $this->serializeProperty($value);
+        }
+        return $normalization;
+    }
+
+    /**
+     * Resolves which properties should be serialized and their BSON field names.
+     * Result is cached per class in $serializablePropertiesCache.
+     *
+     * @return array<string, string> Map of property name => BSON field name
+     */
+    private function resolveSerializableProperties(): array
+    {
+        $reflection = self::$reflectionClassCache[$this::class] ??= new ReflectionClass($this::class);
         $fields = $this->classProperties($this::class);
-        $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc,  [$x->getName() => $x]), []);
+        $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc, [$x->getName() => $x]), []);
         $propertyInfo = $this->propertyInfo();
+        $propertyAccessor = self::$propertyAccessorCache ??= PropertyAccess::createPropertyAccessor();
         $props = $propertyInfo->getProperties($this::class);
+        $serializable = [];
         foreach($props as $prop){
             $attribute = null;
             $field = $fieldsById[$prop] ?? null;
@@ -100,20 +129,16 @@ abstract class Base implements Serializable, Unserializable {
                 }
             }
             if(!$attribute) continue;
-            $attribute = $attribute->newInstance();
 
             $fieldName = u($prop)->snake();
-            $name = $attribute->name ?? $fieldName;
+            $attrInstance = $attribute->newInstance();
+            $name = $attrInstance->name ?? $fieldName;
 
-            $isReadable = $propertyAccessor->isReadable($this, $prop);
-            if(!$isReadable) continue;
-            
-            $value = $propertyAccessor->getValue($this, $prop);
-            $normalization->{$name} = $this->serializeProperty($value);
-            
-            
+            if(!$propertyAccessor->isReadable($this, $prop)) continue;
+
+            $serializable[$prop] = (string)$name;
         }
-        return $normalization;
+        return $serializable;
     }
 
 
@@ -134,12 +159,39 @@ abstract class Base implements Serializable, Unserializable {
     public function bsonUnserialize($data): void
     {
         $this->__construct();
-        $fields = $this->classProperties($this::class);
-        $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc,  [$x->getName() => $x]), []);
-        $propertyInfo = $this->propertyInfo();
         $propertyAccessor = self::$propertyAccessorCache ??= PropertyAccess::createPropertyAccessor();
+        $propertyInfo = $this->propertyInfo();
+
+        if (!isset(self::$deserializablePropertiesCache[$this::class])) {
+            self::$deserializablePropertiesCache[$this::class] = $this->resolveDeserializableProperties();
+        }
+
+        $props = self::$deserializablePropertiesCache[$this::class];
+        foreach($props as $propName => $meta){
+            $name = $meta['bsonName'];
+            $type = $meta['type'];
+            if($this->genericIsset($data, $name)) {
+                $value = $this->accesGeneric($data, $name);
+                $unserializedValue = $this->unserializeProperty($value, $type);
+                if(!is_null($unserializedValue) || ($type && $type instanceof NullableType)) $propertyAccessor->setValue($this, $propName, $unserializedValue);
+            }
+        }
+    }
+
+    /**
+     * Resolves which properties should be deserialized, their BSON field names, and their types.
+     * Result is cached per class in $deserializablePropertiesCache.
+     *
+     * @return array<string, array{bsonName: string, type: ?TypeInfoType}>
+     */
+    private function resolveDeserializableProperties(): array
+    {
+        $fields = $this->classProperties($this::class);
+        $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc, [$x->getName() => $x]), []);
+        $propertyInfo = $this->propertyInfo();
         $props = $propertyInfo->getProperties($this::class);
         $reflection = self::$reflectionClassCache[$this::class] ??= new ReflectionClass($this::class);
+        $deserializable = [];
         foreach($props as $prop){
             $field = $fieldsById[$prop] ?? null;
             $attribute = null;
@@ -152,20 +204,17 @@ abstract class Base implements Serializable, Unserializable {
                 $method = $reflection->getMethod($setter);
                 $attribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
             }
-            
+
             if(!$attribute) continue;
-            $attribute = $attribute->newInstance();
+            $attrInstance = $attribute->newInstance();
 
             $type = $propertyInfo->getType($this::class, $prop);
             $propNameSnake = u($prop)->snake()->toString();
-            $name = $attribute->name ?? $propNameSnake;
+            $name = $attrInstance->name ?? $propNameSnake;
 
-            if($this->genericIsset($data, $name)) {
-                $value = $this->accesGeneric($data, $name);
-                $unserializedValue = $this->unserializeProperty($value, $type);
-                if(! is_null($unserializedValue) || ( $type && $type instanceof NullableType)) $propertyAccessor->setValue($this, $prop, $unserializedValue);
-            }
+            $deserializable[$prop] = ['bsonName' => $name, 'type' => $type];
         }
+        return $deserializable;
     }
 
     public function bsonChanges(Base $b){

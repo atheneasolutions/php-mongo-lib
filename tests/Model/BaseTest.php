@@ -14,7 +14,7 @@ class BaseTest extends TestCase
     private function resetStaticCache(): void
     {
         $ref = new ReflectionClass(Base::class);
-        foreach (['propertyInfoCache', 'propertyAccessorCache', 'reflectionClassCache', 'classPropertiesCache'] as $prop) {
+        foreach (['propertyInfoCache', 'propertyAccessorCache', 'reflectionClassCache', 'classPropertiesCache', 'serializablePropertiesCache', 'deserializablePropertiesCache'] as $prop) {
             $p = $ref->getProperty($prop);
             $p->setAccessible(true);
             $p->setValue(null, $prop === 'propertyInfoCache' || $prop === 'propertyAccessorCache' ? null : []);

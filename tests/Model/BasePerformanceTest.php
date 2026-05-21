@@ -27,6 +27,14 @@ class BasePerformanceTest extends TestCase
         $classPropertiesCache = $ref->getProperty('classPropertiesCache');
         $classPropertiesCache->setAccessible(true);
         $classPropertiesCache->setValue(null, []);
+
+        $serializablePropertiesCache = $ref->getProperty('serializablePropertiesCache');
+        $serializablePropertiesCache->setAccessible(true);
+        $serializablePropertiesCache->setValue(null, []);
+
+        $deserializablePropertiesCache = $ref->getProperty('deserializablePropertiesCache');
+        $deserializablePropertiesCache->setAccessible(true);
+        $deserializablePropertiesCache->setValue(null, []);
     }
 
     protected function setUp(): void
