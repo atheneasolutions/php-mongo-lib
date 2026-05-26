@@ -10,7 +10,7 @@
 $scriptDir = dirname(__FILE__);
 chdir($scriptDir . '/..');
 
-$symfonyPackages = ['symfony/property-info', 'symfony/property-access', 'symfony/serializer'];
+$symfonyPackages = ['symfony/property-info', 'symfony/property-access'];
 
 // Map major version -> specific test version
 $versionMap = [
