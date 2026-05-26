@@ -5,3 +5,4 @@ composer.phar
 ### phpDocumentor.phar ###
 phpDocumentor.phar
 /.phpdoc/
+/.phpunit.result.cache

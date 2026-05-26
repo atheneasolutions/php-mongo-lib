@@ -141,6 +141,15 @@ class NestedModel extends Base
     public function setChild(?Base $child): void { $this->child = $child; }
 }
 
+class SimpleNestedModel extends Base
+{
+    #[BsonSerialize]
+    private ?SimpleModel $child = null;
+
+    public function getChild(): ?SimpleModel { return $this->child; }
+    public function setChild(?SimpleModel $child): void { $this->child = $child; }
+}
+
 class ArrayModel extends Base
 {
     /** @var SimpleModel[] */
@@ -611,7 +620,7 @@ abstract class EmcStadistic extends EmcMongoBase
     public function getModule(): ?string { return $this->module; }
     public function setModule(?string $module): void { $this->module = $module; }
     public function getSubModule(): ?string { return $this->subModule; }
-    public function setEmcSubModule(?string $subModule): void { $this->subModule = $subModule; }
+    public function setSubModule(?string $subModule): void { $this->subModule = $subModule; }
 }
 
 class EmcLoginStatistic extends EmcStadistic
@@ -716,7 +725,7 @@ class MipaAlertaUser extends Base
 
 class MipaAlertaDevice extends Base
 {
-    #[BsonSerialize]
+    #[BsonSerialize(name: '_id')]
     private ?ObjectId $id = null;
 
     #[BsonSerialize]
