@@ -1,7 +1,9 @@
 ### Composer ###
 composer.phar
+composer.lock
 /vendor/
 
 ### phpDocumentor.phar ###
 phpDocumentor.phar
 /.phpdoc/
+/.phpunit.result.cache

@@ -2,521 +2,73 @@
 
 namespace Athenea\MongoLib\Model;
 
-use Athenea\MongoLib\Attribute\BsonSerialize;
-use BackedEnum;
+use Athenea\MongoLib\Serializer\BsonSerializer;
+use Athenea\MongoLib\Serializer\BsonSerializerInterface;
 use MongoDB\BSON\Serializable;
-use MongoDB\BSON\Type;
 use MongoDB\BSON\Unserializable;
-use MongoDB\BSON\UTCDateTime;
-use MongoDB\BSON\UTCDateTimeInterface;
-
-use Symfony\Component\PropertyInfo\Extractor\PhpDocExtractor;
-use Symfony\Component\PropertyInfo\Extractor\ReflectionExtractor;
-use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
-use Symfony\Component\PropertyAccess\PropertyAccess;
-use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
-use function Symfony\Component\String\u;
-
-use ReflectionClass;
 use stdClass;
-use DateTime;
-use DateTimeInterface;
-use Exception;
-use MongoDB\BSON\ObjectId;
-use MongoDB\Model\BSONArray;
-use MongoDB\Model\BSONDocument;
-use ReflectionProperty;
-use Symfony\Component\Serializer\Attribute\DiscriminatorMap;
-use Symfony\Component\TypeInfo\Type as TypeInfoType;
-use Symfony\Component\TypeInfo\Type\BuiltinType;
-use Symfony\Component\TypeInfo\Type\CollectionType;
-use Symfony\Component\TypeInfo\Type\CompositeTypeInterface;
-use Symfony\Component\TypeInfo\Type\NullableType;
-use Symfony\Component\TypeInfo\Type\ObjectType;
-use Symfony\Component\TypeInfo\TypeIdentifier;
 
 /**
- * Classe per modelar documents de mongo i que siguin serialitazbles. 
+ * Classe per modelar documents de mongo i que siguin serialitzables.
  *
- * Si una classe hereda d'aquesta, es pot serialitzar i deserialitzar a mongoDB sempre i quant es compleixi el següent:
+ * Si una classe hereda d'aquesta, es pot serialitzar i deserialitzar a mongoDB
+ * sempre i quan es compleixi el següent:
  * * Tots els camps que es volen serialitzar/deserialitzar implementen {@see Athenea\MongoLib\Attribute\BsonSerialize}
  * * Només es poden serialitzar/deserialitzar elements estandards de mongoDB, primitius, arrays, stdClass i classes que implementen {@see Serializable} o {@see Unserializable}
- * * Per deserialitzar correctament cal posar els tiups de tots els camps o bé a PHP o bé a la documentació
+ * * Per deserialitzar correctament cal posar els tipus de tots els camps o bé a PHP o bé a la documentació
  * * Cal que els camps que siguin serialitzables implementin getters i els deserializables setters o bé que siguin públics
  * * Els camps de tipus {@see UTCDateTimeInterface} es deserialitzen a tipus {@see DateTime} i viceversa
  * * Per deserialitzar els camps només poden tenir un tipus. Si en tenen més s'inferirà el primer que es trobi
  * * Les arrays i els stdClass es deserialitzen/serialitzen recursivament
- *  @author  Lluc Bové <lluc.bove@atheneasolutions.com>
+ *
+ * @author  Lluc Bové <lluc.bove@atheneasolutions.com>
  */
 abstract class Base implements Serializable, Unserializable {
-    
-    private static ?PropertyInfoExtractor $propertyInfoCache = null;
-    private static ?PropertyAccessorInterface $propertyAccessorCache = null;
 
-    /** @var array<string, ReflectionClass> */
-    private static array $reflectionClassCache = [];
-
-    /** @var array<string, ReflectionProperty[]> */
-    private static array $classPropertiesCache = [];
-
-    /** @var array<string, array{prop: string, bsonName: string}[]> Serializable properties per class */
-    private static array $serializablePropertiesCache = [];
-
-    /** @var array<string, array{prop: string, bsonName: string, type: ?TypeInfoType}[]> Deserializable properties per class */
-    private static array $deserializablePropertiesCache = [];
+    private static ?BsonSerializerInterface $defaultSerializer = null;
 
     public function __construct()
     {
-        
+
     }
 
-    /**
-     * Retorna una array o stdClass que es poden serialitzar a BSON
-     * 
-     * Troba tots els camps que té la classe que tenen l'atribut {@see BsonSerialize} i si són accesibles via getters i els posa en stdClass amb el seu nom en
-     * camel case. 
-     * Si els camps són classes que implementen {@see Serializable} es cridarà al mètode bsonSerialize per serialitzar-los.
-     * Els objectes de tipus {@see DateTime} es serialitzen a {@see UTCDateTimeInterface}.
-     * Els arrays es serialitzen recursivament.
-     * Si el camp té un nom especificat amb el camp "name" de {@see BsonSerialize} té prioritat al nom de la variable.
-     * 
-     * @return array|stdClass Una array o stdClass que es poden serialitzar a BSON
-     */
     public function bsonSerialize(): array|stdClass
     {
-        $normalization = new stdClass;
-        $propertyAccessor = self::$propertyAccessorCache ??= PropertyAccess::createPropertyAccessor();
-
-        if (!isset(self::$serializablePropertiesCache[$this::class])) {
-            self::$serializablePropertiesCache[$this::class] = $this->resolveSerializableProperties();
-        }
-
-        $props = self::$serializablePropertiesCache[$this::class];
-        foreach($props as $propName => $bsonName){
-            $value = $propertyAccessor->getValue($this, $propName);
-            $normalization->{$bsonName} = $this->serializeProperty($value);
-        }
-        return $normalization;
+        return self::getSerializer()->serialize($this);
     }
 
-    /**
-     * Resolves which properties should be serialized and their BSON field names.
-     * Result is cached per class in $serializablePropertiesCache.
-     *
-     * @return array<string, string> Map of property name => BSON field name
-     */
-    private function resolveSerializableProperties(): array
-    {
-        $reflection = self::$reflectionClassCache[$this::class] ??= new ReflectionClass($this::class);
-        $fields = $this->classProperties($this::class);
-        $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc, [$x->getName() => $x]), []);
-        $propertyInfo = $this->propertyInfo();
-        $propertyAccessor = self::$propertyAccessorCache ??= PropertyAccess::createPropertyAccessor();
-        $props = $propertyInfo->getProperties($this::class);
-        $serializable = [];
-        foreach($props as $prop){
-            $attribute = null;
-            $field = $fieldsById[$prop] ?? null;
-            if($field){
-                $attribute = $field->getAttributes(BsonSerialize::class)[0] ?? null;
-            }
-            else{
-                foreach(['get', 'is', 'has', 'can'] as $x){
-                    $getter = $x.$prop;
-                    if(!$reflection->hasMethod($getter)) continue;
-                    $method = $reflection->getMethod($getter);
-                    $attribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
-                }
-            }
-            if(!$attribute) continue;
-
-            $fieldName = u($prop)->snake();
-            $attrInstance = $attribute->newInstance();
-            $name = $attrInstance->name ?? $fieldName;
-
-            if(!$propertyAccessor->isReadable($this, $prop)) continue;
-
-            $serializable[$prop] = (string)$name;
-        }
-        return $serializable;
-    }
-
-
-    /**
-     * Deserialitza una array o objecte
-     * 
-     * Troba tots els camps que té la classe que tenen l'atribut {@see BsonSerialize} i si són accesibles via setters i els busca a $data amb seu nom en
-     * camel case. 
-     * Si els camps són classes que implementen {@see Unserializable} es cridarà al mètode bsonUnserialize per deserialitzar-los.
-     * Els objectes de tipus {@see UTCDateTimeInterface} es deserialitzen a {@see DateTime}.
-     * Els arrays i stdClass es deserialitzen recursivament.
-     * Si el camp té un nom especificat amb el camp "name" de {@see BsonSerialize} té prioritat al nom de la variable.
-     * Per fer la deserialització s'utilitzen els tipus inferits dels camps de la classe. Si no es troba cap tipus, es deserialitzarà tal com vingui de base de dades.
-     * Ara mateix només es té en compte un tipus i prou. Si n'hi ha més d'un s'agafa el primer.
-     * 
-     * @return array|stdClass Una array o stdClass que es poden serialitzar a BSON
-     */
     public function bsonUnserialize($data): void
     {
         $this->__construct();
-        $propertyAccessor = self::$propertyAccessorCache ??= PropertyAccess::createPropertyAccessor();
-        $propertyInfo = $this->propertyInfo();
+        self::getSerializer()->unserialize($this, $data);
+    }
 
-        if (!isset(self::$deserializablePropertiesCache[$this::class])) {
-            self::$deserializablePropertiesCache[$this::class] = $this->resolveDeserializableProperties();
-        }
-
-        $props = self::$deserializablePropertiesCache[$this::class];
-        foreach($props as $propName => $meta){
-            $name = $meta['bsonName'];
-            $type = $meta['type'];
-            if($this->genericIsset($data, $name)) {
-                $value = $this->accesGeneric($data, $name);
-                $unserializedValue = $this->unserializeProperty($value, $type);
-                if(!is_null($unserializedValue) || ($type && $type instanceof NullableType)) $propertyAccessor->setValue($this, $propName, $unserializedValue);
-            }
-        }
+    public function bsonChanges(Base $b): array
+    {
+        return self::getSerializer()->diff($this, $b);
     }
 
     /**
-     * Resolves which properties should be deserialized, their BSON field names, and their types.
-     * Result is cached per class in $deserializablePropertiesCache.
+     * Get or lazily create the default serializer shared by all models.
      *
-     * @return array<string, array{bsonName: string, type: ?TypeInfoType}>
+     * Override with setDefaultSerializer() in tests to inject a mock
+     * or pre-configured serializer.
      */
-    private function resolveDeserializableProperties(): array
+    public static function getSerializer(): BsonSerializerInterface
     {
-        $fields = $this->classProperties($this::class);
-        $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc, [$x->getName() => $x]), []);
-        $propertyInfo = $this->propertyInfo();
-        $props = $propertyInfo->getProperties($this::class);
-        $reflection = self::$reflectionClassCache[$this::class] ??= new ReflectionClass($this::class);
-        $deserializable = [];
-        foreach($props as $prop){
-            $field = $fieldsById[$prop] ?? null;
-            $attribute = null;
-            if($field){
-                $attribute = $field->getAttributes(BsonSerialize::class)[0] ?? null;
-            }
-            else {
-                $setter = "set".$prop;
-                if(!$reflection->hasMethod($setter)) continue;
-                $method = $reflection->getMethod($setter);
-                $attribute = $method->getAttributes(BsonSerialize::class)[0] ?? null;
-            }
-
-            if(!$attribute) continue;
-            $attrInstance = $attribute->newInstance();
-
-            $type = $propertyInfo->getType($this::class, $prop);
-            $propNameSnake = u($prop)->snake()->toString();
-            $name = $attrInstance->name ?? $propNameSnake;
-
-            $deserializable[$prop] = ['bsonName' => $name, 'type' => $type];
+        if (self::$defaultSerializer === null) {
+            self::$defaultSerializer = new BsonSerializer();
         }
-        return $deserializable;
+        return self::$defaultSerializer;
     }
 
-    public function bsonChanges(Base $b){
-        return $this->iBsonChanges($this->bsonSerialize(), $b->bsonSerialize());
-    }
-
-    private function iBsonChanges(array | stdClass $aBson, array | stdClass $bBson, string $prefix = ""): array
+    /**
+     * Inject a custom serializer (e.g. for testing).
+     *
+     * Set to null to force re-initialization on next serialization call.
+     */
+    public static function setDefaultSerializer(?BsonSerializerInterface $serializer): void
     {
-        $changes = [];
-        $push = [];
-        $set = [];
-        $unset = [];
-        $pull = [];
-        foreach($aBson as $aKey => $aValue){
-            $bValue = $this->accesGeneric($bBson, $aKey);
-            if(is_null($bValue) && !is_null($aValue)) $unset[$prefix.$aKey] = "";
-            else if(gettype($aValue) !== gettype($bValue)) $set[$prefix.$aKey] = $bValue;
-            else if(is_object($aValue) && ! is_object($bValue)) $set[$prefix.$aKey] = $bValue;
-            else if(!is_object($aValue) && is_object($bValue)) $set[$prefix.$aKey] = $bValue;
-            else if(!is_object($aValue) && !is_object($bValue)) { if($aValue !== $bValue) $set[$prefix.$aKey] = $bValue; }
-            else{
-                if(get_class($aValue) !== get_class($bValue)) $set[$prefix.$aKey] = $bValue;
-                else{
-                    if( ($aValue instanceof stdClass) || ( is_array($aValue) && $this->arrayIsAssoc($aValue) ) ) {
-                        $diff = $this->iBsonChanges($aValue, $bValue, $prefix.$aKey);
-                        if(count($diff) > 0){
-                            if(is_null($iPush = $diff['$push'] ?? null)) $push = [...$push, ...$iPush];
-                            if(is_null($iPull = $diff['$pull'] ?? null)) $pull = [...$pull, ...$iPull];
-                            if(is_null($iSet = $diff['$set'] ?? null)) $set = [...$set, ...$iSet];
-                            if(is_null($iUnset = $diff['$unset'] ?? null)) $unset = [...$unset, ...$iUnset];
-                        }
-                    }
-                    // de moment només distingim cas de fer push
-                    else if(is_array($aValue)) $set[$prefix.$aKey] = $bValue;
-                    else{
-                        if($aValue instanceof ObjectId){
-                            if($aValue->__toString() !== $bValue->__toString()) $set[$prefix.$aKey] = $bValue;
-                        }
-                        else if($aValue instanceof UTCDateTimeInterface){
-                            if($aValue->toDateTime() != $bValue->toDateTime()) $set[$prefix.$aKey] = $bValue;
-                        }
-                        else $set[$prefix.$aKey] = $bValue;
-                    }
-                }
-            }
-        }
-        // camps que són a B i no a A
-        foreach($bBson as $bKey => $bValue){
-            $aValue = $this->accesGeneric($aBson, $bKey);
-            if(is_null($aValue) && !is_null($bValue)) $set[$prefix.$bKey] = $bValue;
-        }
-        if(count($push)) $changes['$push'] = $push;
-        if(count($pull)) $changes['$pull'] = $pull;
-        if(count($set)) $changes['$set'] = $set;
-        if(count($unset)) $changes['$unset'] = $unset;
-        return $changes;
+        self::$defaultSerializer = $serializer;
     }
-        
-    /**
-     * Serialitza una variable
-     * 
-     * Serialitza una variable tal com es descriu a {@see Base::bsonSerialize()}.
-     * 
-     * @todo Implementar conversió de tipus amb l'atribut {@see BsonSerialize}
-     * @param mixed $value Valor a serialitzar
-     * @return mixed Representació del valor a serialitzar
-     */
-    private function serializeProperty($value){
-        $builtinType = gettype($value);
-        if($builtinType === 'object') {
-            $className =get_class($value);
-            if( $className === DateTime::class) return  new UTCDateTime($value->getTimestamp() * 1000);
-            if(is_subclass_of($className, DateTimeInterface::class)) return  new UTCDateTime($value->getTimestamp() * 1000);
-            if(is_subclass_of($className, Serializable::class)) return  $value->bsonSerialize();
-            if(is_subclass_of($className, Type::class)) return $value;
-            if(is_subclass_of($className, BackedEnum::class)) return $value->value;
-            if($value instanceof stdClass) {
-                $newObj = new stdClass;
-                foreach($value as $key => $value){
-                    $key = $this->serializeProperty($key);
-                    $value = $this->serializeProperty($value);
-                    $newObj->{$key} = $value;
-                }
-                return $newObj;
-            }
-            else throw new Exception("Class $className can't be bsonNormalized");
-        }
-        if($builtinType === 'array'){
-            $newArray = [];
-            foreach($value as $key => $value){
-                $key = $this->serializeProperty($key);
-                $value = $this->serializeProperty($value);
-                $newArray[$key] = $value;
-            }
-            return $newArray;
-        }
-        else return $value;
-    }
-
-    /**
-     * Retorna el valor a punt de ser deserialitzat
-     * 
-     * Retorna un valor a punt per ser deserialitzat tal i com es descriu a {@see Base::bsonUnserialize()}.
-     * 
-     * @todo implementar múltiples tipus. Ara mateix només agafa el primer
-     * @param TypeInfoType $type Array amb els tipus del camp a deserialitzar
-     * @return mixed Representació del valor a punt per ser deserialitzada
-     */
-    private function unserializeProperty($value, ?TypeInfoType $type){
-        $wantedType = ($type instanceof CompositeTypeInterface) ? $this->findNonNullType($type->getTypes()) : $type;
-        $wantedTypeClass = ($wantedType instanceof ObjectType) ? $wantedType->getClassName() : ( ($wantedType instanceof BuiltinType) ? $wantedType->getTypeIdentifier()->value : null);
-        $builtinType = gettype($value);
-        if($builtinType === 'object') {
-            $className = get_class($value);
-            if( $value instanceof UTCDateTimeInterface) return $value->toDateTime();
-            if($value instanceof BSONDocument){
-                return $this->unserializeProperty($value->bsonSerialize(), $type);
-            }
-            if($value instanceof BSONArray){
-                return $this->unserializeProperty($value->bsonSerialize(), $type);
-            }
-            if( $value instanceof Unserializable) {
-                //TODO: revisar, sembla que no hauria de ser així. potser no cal la norma.
-                $x = new $className();
-                $x->bsonUnserialize( (array) $value);
-                return $x;
-            }
-            if( $value instanceof stdClass && $wantedTypeClass && is_subclass_of($wantedTypeClass, Unserializable::class)){
-                $concreteClass = $this->findConcreteClass($value, $wantedTypeClass);
-                $x = new $concreteClass();
-                $x->bsonUnserialize( (array) $value);
-                return $x;
-            }
-            if($value instanceof StdClass && $wantedType instanceof CollectionType){
-                $newObj = [];
-                foreach($value as $key => $value){
-                    $value = $this->unserializeProperty($value, null);
-                    $newObj[$key] = $value;
-                }
-                return $newObj;
-            }
-            if($value instanceof StdClass){
-                $className = get_class($value);
-                $newObj = new stdClass;
-                foreach($value as $key => $value){
-                    //TODO: pensar si es poden definir tipus amb objectes
-                    //$objTypes = $wantedType?->isCollection() ? $wantedType->getCollectionValueTypes() : null;
-                    $value = $this->unserializeProperty($value, null);
-                    $newObj->{$key} = $value;
-                }
-                return $newObj;
-            }
-            return $value;
-        }
-        if($builtinType === 'array'){
-            if( $wantedTypeClass && is_subclass_of($wantedTypeClass, Unserializable::class)){
-                $concreteClass = $this->findConcreteClass($value, $wantedTypeClass);
-                $x = new $concreteClass();
-                $x->bsonUnserialize($value);
-                return $x;
-            }
-            $newArray = [];
-            foreach($value as $key => $value){
-                $arrayTypes = $wantedType instanceof CollectionType ? $wantedType->getCollectionValueType() : null;
-                $value = $this->unserializeProperty($value, $arrayTypes);
-                $newArray[$key] = $value;
-            }
-            return $newArray;
-        }
-        else{
-            if(in_array($builtinType, ['string', 'int'])){
-                if(is_subclass_of($wantedTypeClass, BackedEnum::class)){
-                    return $wantedTypeClass::from($value);
-                }
-            }
-            return $value;
-        } 
-    }
-
-    /**
-     * Find first non null type for composite type
-     * @param TypeInfoType[] $types
-     * @return ?TypeInfoType primer tipus no "null", o sino torna null
-     */
-    private function findNonNullType(array $types){
-        foreach($types as $t){
-            if(! $t->isIdentifiedBy(TypeIdentifier::NULL)) return $t;
-        }
-        return null;
-    }
-
-    /**
-     * Donat un objecte i la classe que ha de representar, si la classe és abstracta comprova
-     * si a l'objecte li correspon una classe concreta i en retorna el nom.
-     * 
-     * S'utilitza l'atribut de discriminator map de symfony {@see https://symfony.com/doc/current/components/serializer.html#serializing-interfaces-and-abstract-classes}
-     * 
-     * @param mixed $value El valor a deserialitzar de la classe
-     * @param string $className nom de la classe
-     * @return string nom de la classe concreta si n'hi ha
-     */
-    private function findConcreteClass(mixed $value, string $className){
-        
-        $classInfo = new ReflectionClass($className);
-        $isAbstract = $classInfo->isAbstract();
-        if(!$isAbstract) return $className;
-        $attributes = $classInfo->getAttributes(DiscriminatorMap::class);
-        $oldDiscriminatorAttributes = $classInfo->getAttributes(\Symfony\Component\Serializer\Annotation\DiscriminatorMap::class);
-        $attributes = [...$attributes, ...$oldDiscriminatorAttributes];
-        foreach($attributes as $refAttribute){
-            /**
-             * @var DiscriminatorMap $discMap
-             */
-            $discMap = $refAttribute->newInstance();
-            // getTypeProperty()/getMapping() exist in Symfony ≤7; Symfony 8 uses public readonly props
-            $type = method_exists($discMap, 'getTypeProperty') ? $discMap->getTypeProperty() : $discMap->typeProperty;
-            $valueType = is_array($value) ? ($value[$type] ?? null) : ($value->{$type} ?? null);
-            $mapping = method_exists($discMap, 'getMapping') ? $discMap->getMapping() : $discMap->mapping;
-            $newClass = $mapping[$valueType] ?? null;
-            if(is_null($newClass)) continue;
-            return $this->findConcreteClass($value, $newClass);
-        }
-        throw new Exception("Abstract class $className has no valid discriminator map, can't be unserialized");
-    }
-
-    /**
-     * Retorna les propietats d'una classe tenint en compte les classes pare
-     * que pugui tenir
-     * 
-     * @param string $className nom de la classe
-     * @return ReflectionProperty[] propietats de la classe i el seus pares
-     */
-    private function classProperties(string $className){
-        if (isset(self::$classPropertiesCache[$className])) {
-            return self::$classPropertiesCache[$className];
-        }
-        $reflectionClass = self::$reflectionClassCache[$className] ??= new ReflectionClass($className);
-        $props = $reflectionClass->getProperties();
-        if($parentClass = $reflectionClass->getParentClass()){
-            $parentProperties = $this->classProperties($parentClass->getName());
-            $props = [...$parentProperties, ...$props];
-        }
-        self::$classPropertiesCache[$className] = $props;
-        return $props;
-    }
-
-    /**
-     * Retorna un extractor de informació de propietats
-     * 
-     * Inicialitza un extractor de propietats de Symfony capaç d'extreure informació
-     * mitjançant reflexió i també mitjançant la documentació de les classes
-     */
-    private function propertyInfo(): PropertyInfoExtractor
-    {
-        if (self::$propertyInfoCache !== null) {
-            return self::$propertyInfoCache;
-        }
-
-        $phpDocExtractor = new PhpDocExtractor();
-        $reflectionExtractor = new ReflectionExtractor();
-
-        // list of PropertyListExtractorInterface (any iterable)
-        $listExtractors = [$reflectionExtractor];
-
-        // list of PropertyTypeExtractorInterface (any iterable)
-        $typeExtractors = [$phpDocExtractor, $reflectionExtractor];
-
-        // list of PropertyDescriptionExtractorInterface (any iterable)
-        $descriptionExtractors = [$phpDocExtractor];
-
-        // list of PropertyAccessExtractorInterface (any iterable)
-        $accessExtractors = [$reflectionExtractor];
-
-        // list of PropertyInitializableExtractorInterface (any iterable)
-        $propertyInitializableExtractors = [$reflectionExtractor];
-
-        self::$propertyInfoCache = new PropertyInfoExtractor(
-            $listExtractors,
-            $typeExtractors,
-            $descriptionExtractors,
-            $accessExtractors,
-            $propertyInitializableExtractors
-        );
-        return self::$propertyInfoCache;
-    }
-
-    private function genericIsset($data, $key){
-        if(is_array($data)) return isset($data[$key]);
-        if(is_object($data)) return isset($data->{$key});
-        return false;
-    }
-
-    private function accesGeneric($data, $key){
-        if(is_array($data)) return $data[$key] ?? null;
-        if(is_object($data)) return $data->{$key} ?? null;
-    }
-
-    private function arrayIsAssoc(array $arr)
-    {
-        if (array() === $arr) return false;
-        return array_keys($arr) !== range(0, count($arr) - 1);
-    }
-
-
 }

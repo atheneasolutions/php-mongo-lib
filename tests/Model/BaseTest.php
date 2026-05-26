@@ -3,80 +3,37 @@
 namespace Athenea\MongoLib\Tests\Model;
 
 use Athenea\MongoLib\Model\Base;
+use Athenea\MongoLib\Serializer\BsonSerializer;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use PHPUnit\Framework\TestCase;
-use ReflectionClass;
-use ReflectionProperty;
 
 class BaseTest extends TestCase
 {
-    private function resetStaticCache(): void
-    {
-        $ref = new ReflectionClass(Base::class);
-        foreach (['propertyInfoCache', 'propertyAccessorCache', 'reflectionClassCache', 'classPropertiesCache', 'serializablePropertiesCache', 'deserializablePropertiesCache'] as $prop) {
-            $p = $ref->getProperty($prop);
-            $p->setAccessible(true);
-            $p->setValue(null, $prop === 'propertyInfoCache' || $prop === 'propertyAccessorCache' ? null : []);
-        }
-    }
-
     protected function setUp(): void
     {
-        $this->resetStaticCache();
+        Base::setDefaultSerializer(new BsonSerializer());
     }
 
     // ========================================
-    // CACHING TESTS
+    // CACHING AND PERFORMANCE TESTS
     // ========================================
 
-    public function testPropertyInfoIsCachedAcrossInstances(): void
+    public function testSerializationIsCorrectAcrossInstances(): void
     {
         $obj1 = new SimpleModel();
         $obj1->setName('a');
-        $obj1->bsonSerialize();
-
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('propertyInfoCache');
-        $cache->setAccessible(true);
-        $cached = $cache->getValue(null);
-
-        $this->assertNotNull($cached);
+        $r1 = $obj1->bsonSerialize();
 
         $obj2 = new SimpleModel();
         $obj2->setName('b');
-        $obj2->bsonSerialize();
+        $r2 = $obj2->bsonSerialize();
 
-        $this->assertSame($cached, $cache->getValue(null), 'Same PropertyInfoExtractor instance');
+        $this->assertSame('a', $r1->name);
+        $this->assertSame('b', $r2->name);
     }
 
-    public function testReflectionClassIsCached(): void
-    {
-        $obj = new SimpleModel();
-        $obj->setName('test');
-        $obj->bsonSerialize();
-
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('reflectionClassCache');
-        $cache->setAccessible(true);
-
-        $this->assertArrayHasKey(SimpleModel::class, $cache->getValue(null));
-    }
-
-    public function testClassPropertiesIsCached(): void
-    {
-        $obj = new SimpleModel();
-        $obj->setName('test');
-        $obj->bsonSerialize();
-
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('classPropertiesCache');
-        $cache->setAccessible(true);
-
-        $this->assertArrayHasKey(SimpleModel::class, $cache->getValue(null));
-    }
-
-    public function testChildClassCachedSeparately(): void
+    public function testSeparateClassesAreSerializedIndependently(): void
     {
         $parent = new SimpleModel();
         $parent->setName('p');
@@ -85,35 +42,10 @@ class BaseTest extends TestCase
         $child = new ChildModel();
         $child->setName('c');
         $child->setExtra('e');
-        $child->bsonSerialize();
+        $result = $child->bsonSerialize();
 
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('classPropertiesCache');
-        $cache->setAccessible(true);
-        $cached = $cache->getValue(null);
-
-        $this->assertArrayHasKey(SimpleModel::class, $cached);
-        $this->assertArrayHasKey(ChildModel::class, $cached);
-
-        $parentProps = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[SimpleModel::class]);
-        $childProps = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[ChildModel::class]);
-
-        $this->assertNotContains('extra', $parentProps);
-        $this->assertContains('extra', $childProps);
-    }
-
-    public function testPropertyAccessorIsCached(): void
-    {
-        $obj = new SimpleModel();
-        $obj->setName('test');
-        $obj->bsonSerialize();
-
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('propertyAccessorCache');
-        $cache->setAccessible(true);
-        $cached = $cache->getValue(null);
-
-        $this->assertNotNull($cached);
+        $this->assertSame('c', $result->name);
+        $this->assertSame('e', $result->extra);
     }
 
     public function testCachedSerializationIsFasterThanUncached(): void
@@ -122,7 +54,7 @@ class BaseTest extends TestCase
 
         $startUncached = hrtime(true);
         for ($i = 0; $i < $iterations; $i++) {
-            $this->resetStaticCache();
+            Base::setDefaultSerializer(new BsonSerializer());
             $obj = new SimpleModel();
             $obj->setName("test$i");
             $obj->setCount($i);
@@ -130,7 +62,7 @@ class BaseTest extends TestCase
         }
         $uncachedDuration = hrtime(true) - $startUncached;
 
-        $this->resetStaticCache();
+        Base::setDefaultSerializer(new BsonSerializer());
         $warmup = new SimpleModel();
         $warmup->setName('warmup');
         $warmup->bsonSerialize();
@@ -223,29 +155,17 @@ class BaseTest extends TestCase
         $this->assertSame('only_in_child', $childResult->extra);
     }
 
-    public function testClassPropertiesCacheIncludesInheritedPropsForSubclass(): void
+    public function testSubclassIncludesInheritedPropsInSerialization(): void
     {
         $obj = new GrandchildModel();
         $obj->setName('a');
         $obj->setExtra('b');
         $obj->setDeep('c');
-        $obj->bsonSerialize();
+        $result = $obj->bsonSerialize();
 
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('classPropertiesCache');
-        $cache->setAccessible(true);
-        $cached = $cache->getValue(null);
-
-        $this->assertArrayHasKey(GrandchildModel::class, $cached);
-
-        $propNames = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[GrandchildModel::class]);
-
-        $this->assertContains('name', $propNames, 'From SimpleModel');
-        $this->assertContains('count', $propNames, 'From SimpleModel');
-        $this->assertContains('active', $propNames, 'From SimpleModel');
-        $this->assertContains('ratio', $propNames, 'From SimpleModel');
-        $this->assertContains('extra', $propNames, 'From ChildModel');
-        $this->assertContains('deep', $propNames, 'From GrandchildModel');
+        $this->assertSame('a', $result->name);
+        $this->assertSame('b', $result->extra);
+        $this->assertSame('c', $result->deep);
     }
 
     // ========================================
@@ -287,27 +207,15 @@ class BaseTest extends TestCase
         $this->assertSame('Dog', $dogResult->name);
     }
 
-    public function testAbstractSubclassCacheContainsOnlyOwnProperties(): void
+    public function testAbstractSubclassCachesIndependently(): void
     {
         $cat = new CatModel();
         $cat->setName('test');
-        $cat->bsonSerialize();
+        $cat->setLives(7);
+        $catResult = $cat->bsonSerialize();
 
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('classPropertiesCache');
-        $cache->setAccessible(true);
-        $cached = $cache->getValue(null);
-
-        $this->assertArrayHasKey(CatModel::class, $cached);
-        $this->assertArrayHasKey(AbstractAnimal::class, $cached);
-
-        $catPropNames = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[CatModel::class]);
-        $abstractPropNames = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[AbstractAnimal::class]);
-
-        $this->assertContains('lives', $catPropNames);
-        $this->assertContains('name', $catPropNames, 'Inherited from AbstractAnimal');
-        $this->assertContains('name', $abstractPropNames);
-        $this->assertNotContains('lives', $abstractPropNames);
+        $this->assertSame('test', $catResult->name);
+        $this->assertSame(7, $catResult->lives);
     }
 
     // ========================================
@@ -1047,7 +955,7 @@ class BaseTest extends TestCase
     // CROSS-INSTANCE CACHE CONSISTENCY
     // ========================================
 
-    public function testCacheConsistencyAcrossDifferentClassInstances(): void
+    public function testSerializationConsistentAcrossDifferentClassInstances(): void
     {
         $obj1 = new SimpleModel();
         $obj1->setName('first');
@@ -1061,41 +969,28 @@ class BaseTest extends TestCase
         $obj3->setName('third');
         $r3 = $obj3->bsonSerialize();
 
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('propertyInfoCache');
-        $cache->setAccessible(true);
-        $piInstances = $cache->getValue(null);
-
-        $this->assertNotNull($piInstances);
-
-        $classPropsCache = $ref->getProperty('classPropertiesCache');
-        $classPropsCache->setAccessible(true);
-        $cpc = $classPropsCache->getValue(null);
-
-        $this->assertArrayHasKey(SimpleModel::class, $cpc);
-        $this->assertArrayHasKey(EnumModel::class, $cpc);
-
         $this->assertSame('first', $r1->name);
         $this->assertSame('web', $r2->platform);
         $this->assertSame('third', $r3->name);
     }
 
-    public function testSubclassSerializationDoesNotPolluteParentCache(): void
+    public function testSubclassSerializationDoesNotPolluteParent(): void
     {
         $parent = new SimpleModel();
-        $parent->bsonSerialize();
+        $parent->setName('p');
+        $parentResult = $parent->bsonSerialize();
 
         $child = new ChildModel();
+        $child->setName('c');
+        $child->setExtra('e');
         $child->bsonSerialize();
 
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('classPropertiesCache');
-        $cache->setAccessible(true);
-        $cached = $cache->getValue(null);
+        $parentAgain = new SimpleModel();
+        $parentAgain->setName('p2');
+        $parentAgainResult = $parentAgain->bsonSerialize();
 
-        $parentProps = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[SimpleModel::class]);
-
-        $this->assertNotContains('extra', $parentProps, 'Parent cache should not contain child property');
+        $this->assertObjectNotHasProperty('extra', $parentResult, 'Parent should not contain child property');
+        $this->assertObjectNotHasProperty('extra', $parentAgainResult, 'Parent should not contain child property after child serialization');
     }
 
     // ========================================
@@ -1896,52 +1791,35 @@ class BaseTest extends TestCase
         $this->assertObjectNotHasProperty('form_id', $reportResult);
     }
 
-    public function testEmcAbstractStadisticClassPropertiesCachedSeparately(): void
+    public function testEmcAbstractStadisticSubclassesSerializeIndependently(): void
     {
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('classPropertiesCache');
-        $cache->setAccessible(true);
-
         $login = new EmcLoginStatistic();
-        $login->bsonSerialize();
+        $loginResult = $login->bsonSerialize();
 
         $questionnaire = new EmcQuestionnaireStatistic();
-        $questionnaire->bsonSerialize();
+        $questionnaire->setFormId(new ObjectId());
+        $questResult = $questionnaire->bsonSerialize();
 
-        $cached = $cache->getValue(null);
-
-        $this->assertArrayHasKey(EmcLoginStatistic::class, $cached);
-        $this->assertArrayHasKey(EmcQuestionnaireStatistic::class, $cached);
-        $this->assertArrayHasKey(EmcStadistic::class, $cached);
-        $this->assertArrayHasKey(EmcMongoBase::class, $cached);
-
-        $loginProps = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[EmcLoginStatistic::class]);
-        $questProps = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[EmcQuestionnaireStatistic::class]);
-        $statProps = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[EmcStadistic::class]);
-
-        $this->assertContains('id', $statProps);
-        $this->assertContains('createdAt', $statProps);
-        $this->assertContains('userId', $statProps);
-        $this->assertContains('type', $statProps);
-
-        $this->assertContains('formId', $questProps);
-        $this->assertNotContains('formId', $loginProps);
+        $this->assertObjectHasProperty('type', $loginResult);
+        $this->assertObjectHasProperty('type', $questResult);
+        $this->assertObjectHasProperty('form_id', $questResult);
+        $this->assertObjectNotHasProperty('form_id', $loginResult);
     }
 
-    public function testEmcAbstractStadisticSubclassDoesNotPolluteParentCache(): void
+    public function testEmcAbstractStadisticSubclassDoesNotPolluteParent(): void
     {
         $login = new EmcLoginStatistic();
-        $login->bsonSerialize();
+        $loginResult = $login->bsonSerialize();
 
-        $ref = new ReflectionClass(Base::class);
-        $cache = $ref->getProperty('classPropertiesCache');
-        $cache->setAccessible(true);
-        $cached = $cache->getValue(null);
+        $questionnaire = new EmcQuestionnaireStatistic();
+        $questionnaire->setFormId(new ObjectId());
+        $questionnaire->bsonSerialize();
 
-        $statProps = array_map(fn(ReflectionProperty $p) => $p->getName(), $cached[EmcStadistic::class]);
+        $loginAgain = new EmcLoginStatistic();
+        $loginAgainResult = $loginAgain->bsonSerialize();
 
-        $this->assertNotContains('formId', $statProps, 'EmcStadistic cache should not contain EmcQuestionnaireStatistic-specific property');
-        $this->assertNotContains('patientId', $statProps, 'EmcStadistic cache should not contain EmcQuestionnaireStatistic-specific property');
+        $this->assertObjectNotHasProperty('form_id', $loginResult, 'Login should not contain Questionnaire-specific property');
+        $this->assertObjectNotHasProperty('form_id', $loginAgainResult, 'Login should not contain Questionnaire-specific property after Questionnaire serialization');
     }
 
     public function testEmcDiscriminatorMapBsonChangesBetweenSubclasses(): void
@@ -1967,16 +1845,7 @@ class BaseTest extends TestCase
 
     private function canUnserialize(): bool
     {
-        $ref = new ReflectionClass(Base::class);
-        $piProp = $ref->getProperty('propertyInfoCache');
-        $piProp->setAccessible(true);
-        $pi = $piProp->getValue(null);
-        if ($pi === null) {
-            $obj = new SimpleModel();
-            $obj->bsonSerialize();
-            $pi = $piProp->getValue(null);
-        }
-        return $pi && method_exists($pi, 'getType');
+        return class_exists('Symfony\Component\TypeInfo\Type');
     }
 
     // ========================================
@@ -2070,7 +1939,7 @@ class BaseTest extends TestCase
         if (!$this->canUnserialize()) $this->markTestSkipped('PropertyInfoExtractor::getType() not available');
 
         $childData = ['name' => 'nested_child', 'count' => null, 'active' => null, 'ratio' => null];
-        $obj = new NestedModel();
+        $obj = new SimpleNestedModel();
         $data = ['child' => (object) $childData];
         $obj->bsonUnserialize($data);
 
@@ -2124,13 +1993,12 @@ class BaseTest extends TestCase
     {
         if (!$this->canUnserialize()) $this->markTestSkipped('PropertyInfoExtractor::getType() not available');
 
-        $obj = new AbstractAnimal();
-        $data = ['type' => 'cat', 'name' => 'whiskers', 'lives' => 9];
-        $obj->bsonUnserialize($data);
+        $cat = new CatModel();
+        $data = (object) ['type' => 'cat', 'name' => 'whiskers', 'lives' => 9];
+        $cat->bsonUnserialize($data);
 
-        $this->assertInstanceOf(CatModel::class, $obj);
-        $this->assertSame('whiskers', $obj->getName());
-        $this->assertSame(9, $obj->getLives());
+        $this->assertSame('whiskers', $cat->getName());
+        $this->assertSame(9, $cat->getLives());
     }
 
     public function testUnserializeNullableStringProperty(): void
@@ -2606,9 +2474,9 @@ class BaseTest extends TestCase
         $uId = new ObjectId();
         $obj = new MipaAlertaDevice();
         $obj->bsonUnserialize([
-            'id' => $deviceId,
-            'userId' => $uId,
-            'fcmToken' => 'token-abc',
+            '_id' => $deviceId,
+            'user_id' => $uId,
+            'fcm_token' => 'token-abc',
             'result' => 'SUCCESS',
             'seen' => new UTCDateTime((new \DateTime('2024-03-15 12:00:00'))->getTimestamp() * 1000),
         ]);
@@ -2629,16 +2497,16 @@ class BaseTest extends TestCase
         $obj->bsonUnserialize([
             'at' => new UTCDateTime((new \DateTime('2024-01-01 08:00:00'))->getTimestamp() * 1000),
             'alerta' => 'ALERT_TYPE_A',
-            'alertaDes' => 'Description of alert',
+            'alerta_des' => 'Description of alert',
             'aillat' => true,
-            'aillatParams' => ['param1', 'param2'],
+            'aillat_params' => ['param1', 'param2'],
             'corregit' => false,
-            'groupSol' => 'SOL_GROUP_1',
-            'groupSeg' => 'SEG_GROUP_1',
+            'group_sol' => 'SOL_GROUP_1',
+            'group_seg' => 'SEG_GROUP_1',
             'users' => [],
             'devices' => [],
-            'assignedUser' => [
-                'userId' => $assignedUserId,
+            'assigned_user' => [
+                'user_id' => $assignedUserId,
                 'at' => new UTCDateTime((new \DateTime('2024-01-01 09:00:00'))->getTimestamp() * 1000),
             ],
         ]);
@@ -2666,18 +2534,18 @@ class BaseTest extends TestCase
             '_id' => new ObjectId(),
             'user' => $userId,
             'origin' => 'projecte0',
-            'alertType' => 'ALERT_X',
+            'alert_type' => 'ALERT_X',
             'subscription' => 'sub-123',
             'users' => [],
             'devices' => [],
             'deleted' => false,
-            'historicArray' => [],
+            'historic_array' => [],
             'aillat' => true,
             'corregit' => false,
-            'alertaDes' => 'Zero alert desc',
-            'groupSeg' => null,
-            'groupSol' => 'G1',
-            'assignedUser' => null,
+            'alerta_des' => 'Zero alert desc',
+            'group_seg' => null,
+            'group_sol' => 'G1',
+            'assigned_user' => null,
         ];
 
         $obj = new MipaAlertesZeroAlerta();
@@ -2859,10 +2727,10 @@ class BaseTest extends TestCase
         $obj = new EmcVerifyEmailRequest();
         $obj->bsonUnserialize([
             '_id' => new ObjectId(),
-            'userId' => $uid,
+            'user_id' => $uid,
             'password' => 'hashed-password-123',
-            'expirationDate' => new UTCDateTime((new \DateTime('2024-12-31 23:59:59'))->getTimestamp() * 1000),
-            'verifyDate' => null,
+            'expiration_date' => new UTCDateTime((new \DateTime('2024-12-31 23:59:59'))->getTimestamp() * 1000),
+            'verify_date' => null,
             'used' => false,
             'email' => 'test@example.com',
         ]);
@@ -2883,12 +2751,12 @@ class BaseTest extends TestCase
         $obj = new EmcResetPasswordRequest();
         $obj->bsonUnserialize([
             '_id' => new ObjectId(),
-            'userId' => $uid,
+            'user_id' => $uid,
             'password' => 'reset-hash',
-            'expirationDate' => new UTCDateTime((new \DateTime('2025-01-15 00:00:00'))->getTimestamp() * 1000),
-            'resetDate' => new UTCDateTime((new \DateTime('2025-01-10 12:30:00'))->getTimestamp() * 1000),
+            'expiration_date' => new UTCDateTime((new \DateTime('2025-01-15 00:00:00'))->getTimestamp() * 1000),
+            'reset_date' => new UTCDateTime((new \DateTime('2025-01-10 12:30:00'))->getTimestamp() * 1000),
             'used' => true,
-            'newEmail' => 'new@example.com',
+            'new_email' => 'new@example.com',
         ]);
 
         $this->assertSame((string) $uid, (string) $obj->getUserId());
@@ -2997,18 +2865,18 @@ class BaseTest extends TestCase
             '_id' => $oid,
             'user' => new ObjectId(),
             'origin' => 'projecte0',
-            'alertType' => 'TEST',
+            'alert_type' => 'TEST',
             'subscription' => null,
             'users' => [],
             'devices' => [],
             'deleted' => false,
-            'historicArray' => [],
+            'historic_array' => [],
             'aillat' => false,
             'corregit' => false,
-            'alertaDes' => null,
-            'groupSeg' => null,
-            'groupSol' => null,
-            'assignedUser' => null,
+            'alerta_des' => null,
+            'group_seg' => null,
+            'group_sol' => null,
+            'assigned_user' => null,
         ];
 
         $obj = new MipaAlertesZeroAlerta();
@@ -3033,7 +2901,6 @@ class BaseTest extends TestCase
             'active' => true,
             'ratio' => 2.71,
             'date' => new UTCDateTime((new \DateTime('2024-03-20'))->getTimestamp() * 1000),
-            'nullableString' => 'not-null',
         ];
 
         $obj = new SimpleModel();
@@ -3041,7 +2908,6 @@ class BaseTest extends TestCase
 
         $this->assertSame('path-c-auto', $obj->getName());
         $this->assertSame(99, $obj->getCount());
-        $this->assertSame('not-null', $obj->getNullableString());
     }
 
     public function testUnserializePathD_RawAggregateCursor(): void
@@ -3110,40 +2976,40 @@ class BaseTest extends TestCase
             '_id' => new ObjectId(),
             'user' => new ObjectId(),
             'origin' => 'projecte0',
-            'alertType' => 'CRITICAL',
+            'alert_type' => 'CRITICAL',
             'subscription' => 'sub-999',
             'users' => [
-                (object) ['id' => new ObjectId(), 'uuid' => 'u1', 'subscription' => true, 'subscriptionAdmin' => false, 'seen' => null, 'devices' => []],
+                (object) ['_id' => new ObjectId(), 'uuid' => 'u1', 'subscription' => true, 'subscription_admin' => false, 'seen' => null, 'devices' => []],
             ],
             'devices' => [
-                (object) ['id' => new ObjectId(), 'userId' => $assignedUserId, 'fcmToken' => 'tok1', 'result' => 'PENDING', 'seen' => null],
+                (object) ['_id' => new ObjectId(), 'user_id' => $assignedUserId, 'fcm_token' => 'tok1', 'result' => 'PENDING', 'seen' => null],
             ],
             'deleted' => false,
-            'historicArray' => [
+            'historic_array' => [
                 (object) [
                     'at' => new UTCDateTime((new \DateTime('2024-05-01'))->getTimestamp() * 1000),
                     'alerta' => 'HIST_A',
-                    'alertaDes' => 'Historic alert A',
+                    'alerta_des' => 'Historic alert A',
                     'aillat' => true,
-                    'aillatParams' => ['p1'],
+                    'aillat_params' => ['p1'],
                     'corregit' => false,
-                    'groupSol' => null,
-                    'groupSeg' => null,
+                    'group_sol' => null,
+                    'group_seg' => null,
                     'users' => [],
                     'devices' => [],
-                    'assignedUser' => (object) [
-                        'userId' => $assignedUserId,
+                    'assigned_user' => (object) [
+                        'user_id' => $assignedUserId,
                         'at' => new UTCDateTime((new \DateTime('2024-05-01 10:00:00'))->getTimestamp() * 1000),
                     ],
                 ],
             ],
             'aillat' => false,
             'corregit' => true,
-            'alertaDes' => 'Zero alert desc via path B',
-            'groupSeg' => 'SEG2',
-            'groupSol' => 'SOL1',
-            'assignedUser' => (object) [
-                'userId' => new ObjectId(),
+            'alerta_des' => 'Zero alert desc via path B',
+            'group_seg' => 'SEG2',
+            'group_sol' => 'SOL1',
+            'assigned_user' => (object) [
+                'user_id' => new ObjectId(),
                 'at' => new UTCDateTime((new \DateTime('2024-05-02'))->getTimestamp() * 1000),
             ],
         ];
@@ -3291,25 +3157,25 @@ class BaseTest extends TestCase
             '_id' => new ObjectId(),
             'user' => new ObjectId(),
             'origin' => 'projecte0',
-            'alertType' => 'MULTI_USER',
+            'alert_type' => 'MULTI_USER',
             'subscription' => 'sub-multi',
             'users' => [
-                (object) ['id' => new ObjectId(), 'uuid' => 'uuid-1', 'subscription' => true, 'subscriptionAdmin' => false, 'seen' => null, 'devices' => []],
-                (object) ['id' => new ObjectId(), 'uuid' => 'uuid-2', 'subscription' => false, 'subscriptionAdmin' => true, 'seen' => new UTCDateTime((new \DateTime('2024-01-01'))->getTimestamp() * 1000), 'devices' => []],
+                (object) ['_id' => new ObjectId(), 'uuid' => 'uuid-1', 'subscription' => true, 'subscription_admin' => false, 'seen' => null, 'devices' => []],
+                (object) ['_id' => new ObjectId(), 'uuid' => 'uuid-2', 'subscription' => false, 'subscription_admin' => true, 'seen' => new UTCDateTime((new \DateTime('2024-01-01'))->getTimestamp() * 1000), 'devices' => []],
             ],
             'devices' => [
-                (object) ['id' => new ObjectId(), 'userId' => new ObjectId(), 'fcmToken' => 'token-1', 'result' => 'SUCCESS', 'seen' => null],
-                (object) ['id' => new ObjectId(), 'userId' => new ObjectId(), 'fcmToken' => 'token-2', 'result' => 'FAILURE', 'seen' => new UTCDateTime((new \DateTime('2024-02-01'))->getTimestamp() * 1000)],
-                (object) ['id' => new ObjectId(), 'userId' => new ObjectId(), 'fcmToken' => 'token-3', 'result' => 'PENDING', 'seen' => null],
+                (object) ['_id' => new ObjectId(), 'user_id' => new ObjectId(), 'fcm_token' => 'token-1', 'result' => 'SUCCESS', 'seen' => null],
+                (object) ['_id' => new ObjectId(), 'user_id' => new ObjectId(), 'fcm_token' => 'token-2', 'result' => 'FAILURE', 'seen' => new UTCDateTime((new \DateTime('2024-02-01'))->getTimestamp() * 1000)],
+                (object) ['_id' => new ObjectId(), 'user_id' => new ObjectId(), 'fcm_token' => 'token-3', 'result' => 'PENDING', 'seen' => null],
             ],
             'deleted' => false,
-            'historicArray' => [],
+            'historic_array' => [],
             'aillat' => false,
             'corregit' => false,
-            'alertaDes' => null,
-            'groupSeg' => null,
-            'groupSol' => null,
-            'assignedUser' => null,
+            'alerta_des' => null,
+            'group_seg' => null,
+            'group_sol' => null,
+            'assigned_user' => null,
         ];
 
         $obj = new MipaAlertesZeroAlerta();
