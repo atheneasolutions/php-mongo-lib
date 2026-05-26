@@ -31,7 +31,7 @@ jobs:
           extensions: mongodb
 
       - name: Install Composer dependencies
-        run: composer install --no-interaction --ignore-platform-req=ext-mongodb
+        run: composer update --no-interaction --ignore-platform-reqs
 
       - name: Install Symfony ${{ matrix.symfony-version }}
         run: |
@@ -41,7 +41,7 @@ jobs:
             symfony/serializer:^${{ matrix.symfony-version }} \
             --with-all-dependencies \
             --no-interaction \
-            --ignore-platform-req=ext-mongodb
+            --ignore-platform-reqs
 
       - name: Run tests
         run: vendor/bin/phpunit
