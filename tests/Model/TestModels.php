@@ -2,12 +2,12 @@
 
 namespace Athenea\MongoLib\Tests\Model;
 
+use Athenea\MongoLib\Attribute\BsonDiscriminator;
 use Athenea\MongoLib\Attribute\BsonSerialize;
 use Athenea\MongoLib\Model\Base;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Serializable;
 use MongoDB\BSON\Unserializable;
-use Symfony\Component\Serializer\Attribute\DiscriminatorMap;
 
 enum TestPlatform: string
 {
@@ -83,7 +83,7 @@ abstract class AbstractAnimal extends Base
     public function setName(?string $name): void { $this->name = $name; }
 }
 
-#[DiscriminatorMap('type', ['cat' => CatModel::class, 'dog' => DogModel::class])]
+#[BsonDiscriminator('type', ['cat' => CatModel::class, 'dog' => DogModel::class])]
 class CatModel extends AbstractAnimal
 {
     #[BsonSerialize]
@@ -589,7 +589,7 @@ class EmcRegistrationRequest extends Base
     public function setFromSap(bool $fromSap): void { $this->fromSap = $fromSap; }
 }
 
-#[DiscriminatorMap('type', [
+#[BsonDiscriminator('type', [
     'LOGIN' => EmcLoginStatistic::class,
     'QUESTIONNAIRES' => EmcQuestionnaireStatistic::class,
     'REPORT_DOWNLOAD' => EmcReportDownloadStatistic::class,
@@ -830,7 +830,7 @@ class MipaHistoricRow extends Base
     public function setAssignedUser(?MipaAssignedUser $assignedUser): void { $this->assignedUser = $assignedUser; }
 }
 
-#[DiscriminatorMap('origin', [
+#[BsonDiscriminator('origin', [
     'projecte0' => MipaAlertesZeroAlerta::class,
     'hdom_message' => MipaHdomMessageAlerta::class,
 ])]

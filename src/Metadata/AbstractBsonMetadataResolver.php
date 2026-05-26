@@ -2,6 +2,7 @@
 
 namespace Athenea\MongoLib\Metadata;
 
+use Athenea\MongoLib\Attribute\BsonDiscriminator;
 use Athenea\MongoLib\Attribute\BsonSerialize;
 use ReflectionClass;
 use ReflectionProperty;
@@ -190,7 +191,14 @@ abstract class AbstractBsonMetadataResolver implements BsonMetadataResolverInter
     {
         $reflection = $this->reflectionClassCache[$className] ??= new ReflectionClass($className);
 
-        $attributes = [];
+        // Prefer our own #[BsonDiscriminator] attribute
+        $nativeAttrs = $reflection->getAttributes(BsonDiscriminator::class);
+        if (count($nativeAttrs) > 0) {
+            $attr = $nativeAttrs[0]->newInstance();
+            return new BsonDiscriminatorMap($attr->typeProperty, $attr->mapping);
+        }
+
+        // Fallback: Symfony
 
         if (class_exists(\Symfony\Component\Serializer\Attribute\DiscriminatorMap::class)) {
             $attributes = [...$attributes, ...$reflection->getAttributes(\Symfony\Component\Serializer\Attribute\DiscriminatorMap::class)];
