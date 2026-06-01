@@ -7,10 +7,12 @@ use Athenea\MongoLib\Metadata\BsonDeserializableProperty;
 use Athenea\MongoLib\Metadata\BsonMetadata;
 use Athenea\MongoLib\Metadata\BsonPropertyType;
 use Athenea\MongoLib\Metadata\BsonSerializableProperty;
+use Athenea\MongoLib\Metadata\BsonDiscriminatorMap;
 use Athenea\MongoLib\Tests\Model\AbstractAnimal;
 use Athenea\MongoLib\Tests\Model\ArrayModel;
 use Athenea\MongoLib\Tests\Model\CatModel;
 use Athenea\MongoLib\Tests\Model\ChildModel;
+use Athenea\MongoLib\Tests\Model\DogModel;
 use Athenea\MongoLib\Tests\Model\CustomNameModel;
 use Athenea\MongoLib\Tests\Model\EnumModel;
 use Athenea\MongoLib\Tests\Model\ExtendedSimpleModel;
@@ -33,6 +35,59 @@ use PHPUnit\Framework\TestCase;
 abstract class AbstractMetadataResolverTest extends TestCase
 {
     abstract protected function createResolver(): AbstractBsonMetadataResolver;
+
+    // -- Discriminator map --
+
+    /**
+     * Resolving a class with no discriminator attribute must not emit any PHP warnings.
+     *
+     * Regression test for the uninitialized-$attributes bug in resolveDiscriminatorMap:
+     * when neither Symfony\Component\Serializer DiscriminatorMap class exists the
+     * `foreach ($attributes as ...)` line referenced an undefined variable, emitting
+     * two PHP E_WARNINGs ("Undefined variable $attributes" and "foreach() argument
+     * must be of type array|object, null given").
+     */
+    public function testResolveClassWithoutDiscriminatorProducesNoWarnings(): void
+    {
+        $warnings = [];
+        set_error_handler(static function (int $errno, string $errstr) use (&$warnings): bool {
+            $warnings[] = $errstr;
+            return true;
+        });
+
+        try {
+            $resolver = $this->createResolver();
+            $resolver->resolve(SimpleModel::class);
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertEmpty(
+            $warnings,
+            'Expected no PHP warnings from resolveDiscriminatorMap, got: ' . implode('; ', $warnings)
+        );
+    }
+
+    public function testDiscriminatorMapIsNullForClassWithoutDiscriminatorAttribute(): void
+    {
+        $resolver = $this->createResolver();
+        $metadata = $resolver->resolve(SimpleModel::class);
+
+        $this->assertNull($metadata->discriminatorMap);
+    }
+
+    public function testBsonDiscriminatorAttributeIsResolved(): void
+    {
+        $resolver = $this->createResolver();
+        $metadata = $resolver->resolve(CatModel::class);
+
+        $this->assertInstanceOf(BsonDiscriminatorMap::class, $metadata->discriminatorMap);
+        $this->assertSame('type', $metadata->discriminatorMap->typeProperty);
+        $this->assertSame(
+            ['cat' => CatModel::class, 'dog' => DogModel::class],
+            $metadata->discriminatorMap->mapping
+        );
+    }
 
     // -- Basic contract --
 

@@ -200,6 +200,8 @@ abstract class AbstractBsonMetadataResolver implements BsonMetadataResolverInter
 
         // Fallback: Symfony
 
+        $attributes = [];
+
         if (class_exists(\Symfony\Component\Serializer\Attribute\DiscriminatorMap::class)) {
             $attributes = [...$attributes, ...$reflection->getAttributes(\Symfony\Component\Serializer\Attribute\DiscriminatorMap::class)];
         }
