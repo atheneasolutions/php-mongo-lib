@@ -94,28 +94,18 @@ class Utils{
     }
 
     public static function insertOne(\MongoDB\Collection $collection, &$document, array $options = []) {
-        if( is_array($document)){
+        if (is_array($document)) {
             $document['updated_at'] = self::now();
             $document['created_at'] = self::now();
-        }
-        
-        if(is_a($document, MongoDocument::class)) {
-            $document->updated_at = self::now();
-            $document->created_at = self::now();
         }
         return $collection->insertOne($document, $options);
     }
 
     public static function insertMany(\MongoDB\Collection $collection, array &$documents, array $options = []) {
-        foreach($documents as $document){
-            if( is_array($document)){
+        foreach ($documents as $document) {
+            if (is_array($document)) {
                 $document['updated_at'] = self::now();
                 $document['created_at'] = self::now();
-            }
-            
-            if(is_a($document, MongoDocument::class)) {
-                $document->updated_at = self::now();
-                $document->created_at = self::now();
             }
         }
         return $collection->insertMany($documents, $options);
@@ -124,25 +114,20 @@ class Utils{
     public static function insertByChunks(\MongoDB\Collection $collection, &$documents, int $chunks = 100, array $options = []) {
         $buffer = [];
         $i = 0;
-        foreach($documents as $document){
-            if( is_array($document)){
+        foreach ($documents as $document) {
+            if (is_array($document)) {
                 $document['updated_at'] = self::now();
                 $document['created_at'] = self::now();
             }
-            
-            if(is_a($document, MongoDocument::class)) {
-                $document->updated_at = self::now();
-                $document->created_at = self::now();
-            }
             $buffer[] = $document;
             ++$i;
-            if($i >= $chunks){
+            if ($i >= $chunks) {
                 $collection->insertMany($buffer, $options);
                 $i = 0;
                 $buffer = [];
             }
         }
-        if(sizeof($buffer) > 0 )$collection->insertMany($buffer, $options);
+        if (sizeof($buffer) > 0) $collection->insertMany($buffer, $options);
     }
 
     public static function updateOne(\MongoDB\Collection $collection, $filter,  $update, array $options = []) {
@@ -158,8 +143,7 @@ class Utils{
     }
 
     public static function replaceOne(\MongoDB\Collection $collection, $filter, &$document, array $options = []){
-        if(is_a($document, MongoDocument::class)) $document->updated_at = self::now();
-        if(is_array($document)) $document['updated_at'] = self::now();
+        if (is_array($document)) $document['updated_at'] = self::now();
         $replace_result = $collection->replaceOne($filter, $document, $options);
         if($replace_result->getUpsertedCount() > 0) 
             $collection->updateOne(['_id' => $replace_result->getUpsertedId()], ['created_at' => new DateTime()]);

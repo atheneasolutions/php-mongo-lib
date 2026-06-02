@@ -20,6 +20,12 @@ jobs:
             symfony-version: '5.4'
           - php-version: '8.1'
             symfony-version: '6.4'
+        exclude:
+          # SF 8.0 ReflectionExtractor calls hasHook() which requires PHP 8.4
+          - php-version: '8.2'
+            symfony-version: '8.0'
+          - php-version: '8.3'
+            symfony-version: '8.0'
 
     steps:
       - uses: actions/checkout@v4

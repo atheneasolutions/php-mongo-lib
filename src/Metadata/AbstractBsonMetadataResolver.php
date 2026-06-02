@@ -74,7 +74,7 @@ abstract class AbstractBsonMetadataResolver implements BsonMetadataResolverInter
         $fields = $this->classProperties($className);
         $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc, [$x->getName() => $x]), []);
         $propertyInfo = $this->propertyInfo;
-        $props = $propertyInfo->getProperties($className);
+        $props = $propertyInfo->getProperties($className) ?? [];
         $result = [];
 
         foreach ($props as $prop) {
@@ -100,7 +100,7 @@ abstract class AbstractBsonMetadataResolver implements BsonMetadataResolverInter
         $fields = $this->classProperties($className);
         $fieldsById = array_reduce($fields, fn(array $acc, ReflectionProperty $x) => array_merge($acc, [$x->getName() => $x]), []);
         $propertyInfo = $this->propertyInfo;
-        $props = $propertyInfo->getProperties($className);
+        $props = $propertyInfo->getProperties($className) ?? [];
         $reflection = $this->reflectionClassCache[$className] ??= new ReflectionClass($className);
         $result = [];
 
