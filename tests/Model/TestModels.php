@@ -165,6 +165,37 @@ class ArrayModel extends Base
     public function setTags(array $tags): void { $this->tags = $tags; }
 }
 
+// Untyped property — forces null return from getType(), exercises the null branch
+// in Symfony7MetadataResolver::convertTypeInfoToBsonPropertyType().
+class UntypedPropertyModel extends Base
+{
+    #[BsonSerialize]
+    private $value = null;
+
+    public function getValue() { return $this->value; }
+    public function setValue($v): void { $this->value = $v; }
+}
+
+// Non-nullable nested object — exercises ObjectType without NullableType wrapper.
+class NonNullableChildModel extends Base
+{
+    #[BsonSerialize]
+    private SimpleModel $child;
+
+    public function getChild(): SimpleModel { return $this->child; }
+    public function setChild(SimpleModel $child): void { $this->child = $child; }
+}
+
+// Union type property — exercises CompositeTypeInterface branch.
+class UnionTypeModel extends Base
+{
+    #[BsonSerialize]
+    private string|int $mixed = 0;
+
+    public function getMixed(): string|int { return $this->mixed; }
+    public function setMixed(string|int $mixed): void { $this->mixed = $mixed; }
+}
+
 class DateTimeModel extends Base
 {
     #[BsonSerialize]
@@ -262,6 +293,16 @@ class StdClassModel extends Base
 
     public function getMetadata(): ?\stdClass { return $this->metadata; }
     public function setMetadata(?\stdClass $metadata): void { $this->metadata = $metadata; }
+}
+
+// Property that accepts any object — used to test the "unsupported class" exception path.
+class AnyObjectModel extends Base
+{
+    #[BsonSerialize]
+    private object $obj;
+
+    public function getObj(): object { return $this->obj; }
+    public function setObj(object $obj): void { $this->obj = $obj; }
 }
 
 // ========================================
@@ -1124,4 +1165,67 @@ class EmcSession extends EmcMongoBase
     public function setDeviceConnected(bool $deviceConnected): void { $this->deviceConnected = $deviceConnected; }
     public function getContactedRequestAt(): ?\DateTime { return $this->contactedRequestAt; }
     public function setContactedRequestAt(?\DateTime $contactedRequestAt): void { $this->contactedRequestAt = $contactedRequestAt; }
+}
+
+// Models a real-world document root (e.g. MongoBase in mongo-bundle) where $id is a
+// non-nullable typed property with no default — it is uninitialized on brand-new entities.
+class UninitializedIdModel extends Base
+{
+    #[BsonSerialize(name: '_id')]
+    private ObjectId $id; // non-nullable, no default value — will be uninitialized on new()
+
+    #[BsonSerialize]
+    private string $name = 'default';
+
+    public function getId(): ObjectId { return $this->id; }
+    public function setId(ObjectId $id): void { $this->id = $id; }
+    public function getName(): string { return $this->name; }
+    public function setName(string $name): void { $this->name = $name; }
+}
+
+// Counts __construct() calls so tests can assert it is called exactly once during
+// deserialization (once by BsonSerializer::unserialize, NOT again by Base::bsonUnserialize).
+class ConstructorCountModel extends Base
+{
+    public static int $constructorCallCount = 0;
+
+    #[BsonSerialize]
+    private string $name = 'default';
+
+    public function __construct()
+    {
+        parent::__construct();
+        self::$constructorCallCount++;
+    }
+
+    public function getName(): string { return $this->name; }
+    public function setName(string $name): void { $this->name = $name; }
+}
+
+// Private field with #[BsonSerialize] but no getter — should be silently excluded
+// (parity with old isReadable() guard that skipped non-readable properties).
+class PrivateNoGetterModel extends Base
+{
+    #[BsonSerialize]
+    private string $secret = 'hidden'; // no getter → not readable → must be excluded
+
+    #[BsonSerialize]
+    private string $visible = 'shown';
+
+    public function getVisible(): string { return $this->visible; }
+    public function setVisible(string $v): void { $this->visible = $v; }
+}
+
+// Private getter with #[BsonSerialize] — the getter itself is private so PropertyAccessor
+// cannot call it; the property must be excluded just like a missing getter.
+class PrivateGetterModel extends Base
+{
+    private string $hidden = 'nope';
+
+    #[BsonSerialize]
+    private string $open = 'yes';
+
+    private function getHidden(): string { return $this->hidden; } // private getter → not readable
+    public function getOpen(): string { return $this->open; }
+    public function setOpen(string $v): void { $this->open = $v; }
 }

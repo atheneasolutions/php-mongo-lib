@@ -53,7 +53,11 @@ class BsonSerializer implements BsonSerializerInterface
         $normalization = new stdClass();
 
         foreach ($metadata->serializableProps as $propName => $prop) {
-            $value = $propertyAccessor->getValue($object, $propName);
+            try {
+                $value = $propertyAccessor->getValue($object, $propName);
+            } catch (\Symfony\Component\PropertyAccess\Exception\UninitializedPropertyException) {
+                continue;
+            }
             $normalization->{$prop->bsonName} = $this->serializeValue($value);
         }
 

@@ -39,7 +39,6 @@ abstract class Base implements Serializable, Unserializable {
 
     public function bsonUnserialize($data): void
     {
-        $this->__construct();
         self::getSerializer()->unserialize($this, $data);
     }
 

@@ -11,6 +11,9 @@ use Athenea\MongoLib\Metadata\BsonDiscriminatorMap;
 use Athenea\MongoLib\Tests\Model\AbstractAnimal;
 use Athenea\MongoLib\Tests\Model\ArrayModel;
 use Athenea\MongoLib\Tests\Model\CatModel;
+use Athenea\MongoLib\Tests\Model\NonNullableChildModel;
+use Athenea\MongoLib\Tests\Model\UnionTypeModel;
+use Athenea\MongoLib\Tests\Model\UntypedPropertyModel;
 use Athenea\MongoLib\Tests\Model\ChildModel;
 use Athenea\MongoLib\Tests\Model\DogModel;
 use Athenea\MongoLib\Tests\Model\CustomNameModel;
@@ -263,5 +266,59 @@ abstract class AbstractMetadataResolverTest extends TestCase
 
         $this->assertArrayHasKey('items', $metadata->deserializableProps);
         $this->assertArrayHasKey('tags', $metadata->deserializableProps);
+    }
+
+    // -- Type resolution detail tests --
+
+    public function testNullableStringPropertyIsNullable(): void
+    {
+        $resolver = $this->createResolver();
+        $metadata = $resolver->resolve(\Athenea\MongoLib\Tests\Model\SimpleModel::class);
+
+        $this->assertTrue($metadata->deserializableProps['name']->type->isNullable);
+    }
+
+    public function testUntypedPropertyResolvesToEmptyType(): void
+    {
+        $resolver = $this->createResolver();
+        $metadata = $resolver->resolve(UntypedPropertyModel::class);
+
+        $this->assertArrayHasKey('value', $metadata->deserializableProps);
+        $prop = $metadata->deserializableProps['value'];
+        $this->assertFalse($prop->type->isCollection);
+        $this->assertNull($prop->type->className);
+    }
+
+    public function testNonNullableObjectPropertyHasClassName(): void
+    {
+        $resolver = $this->createResolver();
+        $metadata = $resolver->resolve(NonNullableChildModel::class);
+
+        $this->assertArrayHasKey('child', $metadata->deserializableProps);
+        $prop = $metadata->deserializableProps['child'];
+        $this->assertSame(SimpleModel::class, $prop->type->className);
+        $this->assertFalse($prop->type->isCollection);
+        $this->assertFalse($prop->type->isNullable);
+    }
+
+    public function testCollectionPropertyHasCollectionTypeAndClassName(): void
+    {
+        $resolver = $this->createResolver();
+        $metadata = $resolver->resolve(ArrayModel::class);
+
+        $prop = $metadata->deserializableProps['items'];
+        $this->assertTrue($prop->type->isCollection);
+        $this->assertSame(SimpleModel::class, $prop->type->className);
+    }
+
+    public function testUnionTypePropertyResolvesToFirstNonNullType(): void
+    {
+        $resolver = $this->createResolver();
+        $metadata = $resolver->resolve(UnionTypeModel::class);
+
+        $this->assertArrayHasKey('mixed', $metadata->deserializableProps);
+        // Union type string|int — resolved to a non-collection, non-nullable scalar type
+        $prop = $metadata->deserializableProps['mixed'];
+        $this->assertFalse($prop->type->isCollection);
     }
 }

@@ -16,6 +16,23 @@ class BaseTest extends TestCase
     }
 
     // ========================================
+    // LAZY SERIALIZER INITIALIZATION
+    // ========================================
+
+    public function testGetSerializerLazyInitializesWhenNull(): void
+    {
+        Base::setDefaultSerializer(null);
+        $serializer = Base::getSerializer();
+
+        $this->assertInstanceOf(BsonSerializer::class, $serializer);
+        // Calling again returns the same instance (not a new one each time).
+        $this->assertSame($serializer, Base::getSerializer());
+
+        // Restore for subsequent tests.
+        Base::setDefaultSerializer(new BsonSerializer());
+    }
+
+    // ========================================
     // CACHING AND PERFORMANCE TESTS
     // ========================================
 

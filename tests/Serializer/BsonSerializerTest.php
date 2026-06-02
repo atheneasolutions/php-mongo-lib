@@ -18,6 +18,15 @@ use Athenea\MongoLib\Tests\Model\PublicPropertyModel;
 use Athenea\MongoLib\Tests\Model\SimpleModel;
 use Athenea\MongoLib\Tests\Model\TestPlatform;
 use Athenea\MongoLib\Tests\Model\TestStatus;
+use Athenea\MongoLib\Tests\Model\AnyObjectModel;
+use Athenea\MongoLib\Tests\Model\ConstructorCountModel;
+use Athenea\MongoLib\Metadata\BsonMetadataResolverInterface;
+use Athenea\MongoLib\PropertyAccess\BsonPropertyAccessorInterface;
+use Athenea\MongoLib\PropertyAccess\SymfonyPropertyAccessor;
+use Athenea\MongoLib\Tests\Model\PrivateGetterModel;
+use Athenea\MongoLib\Tests\Model\PrivateNoGetterModel;
+use Athenea\MongoLib\Tests\Model\StdClassModel;
+use Athenea\MongoLib\Tests\Model\UninitializedIdModel;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use PHPUnit\Framework\TestCase;
@@ -326,6 +335,289 @@ class BsonSerializerTest extends TestCase
 
         $this->assertArrayHasKey('$set', $changes);
         $this->assertSame((string) $id2, (string) $changes['$set']['_id']);
+    }
+
+    // -- Constructor / setMetadataResolver --
+
+    public function testConstructorWithCustomPropertyAccessorCachesIt(): void
+    {
+        $accessor = new SymfonyPropertyAccessor();
+        $serializer = new BsonSerializer($accessor);
+
+        $model = new SimpleModel();
+        $model->setName('via-custom-accessor');
+        $result = $serializer->serialize($model);
+
+        $this->assertSame('via-custom-accessor', $result->name);
+
+        // Reset the static cache so this test doesn't affect the others.
+        $ref = new \ReflectionProperty(BsonSerializer::class, 'propertyAccessorCache');
+        $ref->setAccessible(true);
+        $ref->setValue(null, null);
+    }
+
+    public function testSetMetadataResolverIsUsedForSubsequentCalls(): void
+    {
+        $resolver = $this->createMock(BsonMetadataResolverInterface::class);
+        $resolver->expects($this->atLeastOnce())
+            ->method('resolve')
+            ->willReturn(new \Athenea\MongoLib\Metadata\BsonMetadata(
+                SimpleModel::class, [], [], null
+            ));
+
+        $serializer = new BsonSerializer();
+        $serializer->setMetadataResolver($resolver);
+
+        $result = $serializer->serialize(new SimpleModel());
+        $this->assertInstanceOf(\stdClass::class, $result);
+    }
+
+    // -- Non-readable properties (no public getter) --
+
+    public function testSerializeSkipsPrivateFieldWithNoGetter(): void
+    {
+        // $secret has #[BsonSerialize] but no getter — must be excluded, not throw.
+        $model = new PrivateNoGetterModel();
+        $result = $this->serializer->serialize($model);
+
+        $this->assertObjectNotHasProperty('secret', $result);
+        $this->assertSame('shown', $result->visible);
+    }
+
+    public function testSerializeSkipsPrivateGetterProperty(): void
+    {
+        // $hidden has a private getter — PropertyAccessor can't call it, must be excluded.
+        $model = new PrivateGetterModel();
+        $result = $this->serializer->serialize($model);
+
+        $this->assertObjectNotHasProperty('hidden', $result);
+        $this->assertSame('yes', $result->open);
+    }
+
+    // -- Uninitialized typed properties --
+
+    public function testSerializeSkipsUninitializedNonNullableProperty(): void
+    {
+        // Reproduces the mipa bug: MongoBase::$id is typed ObjectId (non-nullable, no default).
+        // On a brand-new entity (before first insert) $id is uninitialized.
+        // serialize() must skip it instead of throwing UninitializedPropertyException.
+        $model = new UninitializedIdModel();
+
+        $result = $this->serializer->serialize($model);
+
+        $this->assertInstanceOf(stdClass::class, $result);
+        $this->assertObjectNotHasProperty('_id', $result);
+        $this->assertSame('default', $result->name);
+    }
+
+    public function testSerializeIncludesPropertyOnceInitialized(): void
+    {
+        $model = new UninitializedIdModel();
+        $id = new ObjectId();
+        $model->setId($id);
+
+        $result = $this->serializer->serialize($model);
+
+        $this->assertObjectHasProperty('_id', $result);
+        $this->assertSame((string) $id, (string) $result->_id);
+    }
+
+    // -- DateTimeImmutable serialization --
+
+    public function testSerializeDateTimeImmutable(): void
+    {
+        // DateTimeImmutable implements DateTimeInterface but is not DateTime::class
+        // — exercises the is_subclass_of(DateTimeInterface) branch in serializeValue.
+        $meta = new \stdClass();
+        $meta->ts = new \DateTimeImmutable('2024-06-01 12:00:00');
+        $model = new StdClassModel();
+        $model->setMetadata($meta);
+
+        $result = $this->serializer->serialize($model);
+
+        $this->assertInstanceOf(UTCDateTime::class, $result->metadata->ts);
+    }
+
+    // -- Unsupported object type exception --
+
+    public function testSerializeThrowsForUnknownObjectType(): void
+    {
+        $model = new AnyObjectModel();
+        $model->setObj(new \ArrayObject([1, 2]));
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessageMatches("/can't be bsonNormalized/");
+        $this->serializer->serialize($model);
+    }
+
+    // -- findConcreteClass exception for abstract without discriminator map --
+
+    public function testFindConcreteClassThrowsForAbstractWithoutDiscriminatorMap(): void
+    {
+        // AbstractAnimal has no DiscriminatorMap on it by default in our fixtures.
+        // Trying to deserialize a stdClass value into it must throw LogicException.
+        $model = new NestedModel(); // child typed as ?Base (abstract hierarchy parent)
+        $data = ['child' => (object) ['name' => 'cat']]; // no type key
+
+        $this->expectException(\LogicException::class);
+        $this->serializer->unserialize($model, $data);
+    }
+
+    // -- BSONDocument / BSONArray in unserializeValue --
+
+    public function testUnserializeHandlesBSONDocumentValue(): void
+    {
+        $bsonDoc = new \MongoDB\Model\BSONDocument(['name' => 'from-bson', 'count' => 7]);
+        $data = ['child' => $bsonDoc];
+
+        $model = new SimpleNestedModel();
+        $this->serializer->unserialize($model, $data);
+
+        $this->assertNotNull($model->getChild());
+        $this->assertSame('from-bson', $model->getChild()->getName());
+    }
+
+    public function testUnserializeHandlesBSONArrayValue(): void
+    {
+        $bsonArr = new \MongoDB\Model\BSONArray(['alpha', 'beta']);
+        $data = ['tags' => $bsonArr];
+
+        $model = new ArrayModel();
+        $this->serializer->unserialize($model, $data);
+
+        $this->assertSame(['alpha', 'beta'], $model->getTags());
+    }
+
+    // -- stdClass generic unserialize --
+
+    public function testUnserializeStdClassProperty(): void
+    {
+        $meta = new \stdClass();
+        $meta->key = 'value';
+        $data = ['metadata' => $meta];
+
+        $model = new StdClassModel();
+        $this->serializer->unserialize($model, $data);
+
+        $this->assertInstanceOf(\stdClass::class, $model->getMetadata());
+        $this->assertSame('value', $model->getMetadata()->key);
+    }
+
+    // -- Array generic fallback in unserializeValue --
+
+    public function testUnserializeGenericArrayProperty(): void
+    {
+        $data = ['tags' => ['x', 'y', 'z']];
+
+        $model = new ArrayModel();
+        $this->serializer->unserialize($model, $data);
+
+        $this->assertSame(['x', 'y', 'z'], $model->getTags());
+    }
+
+    // -- Nested diff (computeDiff recursive path) --
+
+    public function testDiffNestedFieldChanged(): void
+    {
+        $old = new SimpleNestedModel();
+        $inner = new SimpleModel();
+        $inner->setName('before');
+        $old->setChild($inner);
+
+        $new = new SimpleNestedModel();
+        $inner2 = new SimpleModel();
+        $inner2->setName('after');
+        $new->setChild($inner2);
+
+        $changes = $this->serializer->diff($old, $new);
+
+        $this->assertArrayHasKey('$set', $changes);
+        $this->assertSame('after', $changes['$set']['child.name']);
+        $this->assertArrayNotHasKey('child', $changes['$set'] ?? []);
+    }
+
+    public function testDiffNestedFieldAdded(): void
+    {
+        $old = new SimpleNestedModel();
+        $inner = new SimpleModel();
+        $old->setChild($inner);
+
+        $new = new SimpleNestedModel();
+        $inner2 = new SimpleModel();
+        $inner2->setName('added');
+        $new->setChild($inner2);
+
+        $changes = $this->serializer->diff($old, $new);
+
+        $this->assertArrayHasKey('$set', $changes);
+        $this->assertSame('added', $changes['$set']['child.name']);
+    }
+
+    public function testDiffNestedFieldRemoved(): void
+    {
+        $old = new SimpleNestedModel();
+        $inner = new SimpleModel();
+        $inner->setName('gone');
+        $old->setChild($inner);
+
+        $new = new SimpleNestedModel();
+        $inner2 = new SimpleModel();
+        $new->setChild($inner2);
+
+        $changes = $this->serializer->diff($old, $new);
+
+        $this->assertArrayHasKey('$unset', $changes);
+        $this->assertArrayHasKey('child.name', $changes['$unset']);
+    }
+
+    public function testDiffNestedNoChanges(): void
+    {
+        $old = new SimpleNestedModel();
+        $inner = new SimpleModel();
+        $inner->setName('same');
+        $old->setChild($inner);
+
+        $new = new SimpleNestedModel();
+        $inner2 = new SimpleModel();
+        $inner2->setName('same');
+        $new->setChild($inner2);
+
+        $changes = $this->serializer->diff($old, $new);
+
+        $this->assertEmpty($changes);
+    }
+
+    public function testDiffStdClassNestedFieldChanged(): void
+    {
+        $meta1 = new \stdClass();
+        $meta1->key = 'old';
+        $old = new StdClassModel();
+        $old->setMetadata($meta1);
+
+        $meta2 = new \stdClass();
+        $meta2->key = 'new';
+        $new = new StdClassModel();
+        $new->setMetadata($meta2);
+
+        $changes = $this->serializer->diff($old, $new);
+
+        $this->assertArrayHasKey('$set', $changes);
+        $this->assertSame('new', $changes['$set']['metadata.key']);
+    }
+
+    // -- Double __construct() on deserialization --
+
+    public function testUnserializeCallsConstructorExactlyOnce(): void
+    {
+        // BsonSerializer::unserialize() must call __construct() once to reset
+        // object state before populating from BSON data. Base::bsonUnserialize()
+        // must NOT add a second call — it should just delegate to the serializer.
+        ConstructorCountModel::$constructorCallCount = 0;
+        $model = new ConstructorCountModel(); // count = 1 (from new)
+
+        $model->bsonUnserialize(['name' => 'test']); // must add exactly 1 more
+
+        $this->assertSame(2, ConstructorCountModel::$constructorCallCount);
     }
 
     // -- Integration --
